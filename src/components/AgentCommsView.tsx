@@ -26,7 +26,7 @@ interface AgentCommsViewProps {
   onSendProtocol: (request: AgentProtocolRequest) => Promise<AgentProtocolReply | undefined>;
   onSendMessage: (
     message: string,
-    agent: 'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'si_1',
+    agent: 'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'Aria',
     attachments?: ChatAttachment[],
   ) => Promise<void>;
   onRunAstyriaMission: (action: AstyriaMissionAction) => Promise<void>;
@@ -52,7 +52,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   onUnclog,
   onRestoreBackup,
 }) => {
-  const [selectedTarget, setSelectedTarget] = useState<'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'si_1'>('triad');
+  const [selectedTarget, setSelectedTarget] = useState<'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'Aria'>('triad');
   const [selectedCommand, setSelectedCommand] = useState<AgentProtocolCommand>('SYSTEM_STATUS');
   const [signal, setSignal] = useState('');
   const [omega, setOmega] = useState('');
@@ -188,7 +188,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               <option value="Alex">Alex</option>
               <option value="Astyria">Astyria</option>
               <option value="Aurelius">Aurelius</option>
-              <option value="si_1">Aria</option>
+              <option value="Aria">Aria</option>
             </select>
           </div>
 
@@ -501,7 +501,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
           </label>
           <button
             type="submit"
-            aria-label={`Wyślij wiadomość do ${{ triad: 'Triady', si_1: 'Arii', Alex: 'Alexa', Astyria: 'Astyrii', Aurelius: 'Aureliusa' }[selectedTarget]}`}
+            aria-label={`Wyślij wiadomość do ${{ triad: 'Triady', Aria: 'Arii', Alex: 'Alexa', Astyria: 'Astyrii', Aurelius: 'Aureliusa' }[selectedTarget]}`}
             disabled={(!messageText.trim() && chatAttachments.length === 0) || isLoading}
             className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-2.5 py-2.5 font-mono text-xs font-bold text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.3)] transition hover:from-emerald-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-xl sm:px-3"
           >
@@ -545,7 +545,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
           </span>
         </div>
 
-        {(['Alex', 'Astyria', 'Aurelius', 'si_1'] as const).map((agentKey) => {
+        {(['Alex', 'Astyria', 'Aurelius', 'Aria'] as const).map((agentKey) => {
           const profile = SYSTEM_AGENTS[agentKey];
           return (
             <div
