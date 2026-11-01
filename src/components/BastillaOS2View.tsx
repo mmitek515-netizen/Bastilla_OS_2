@@ -27,6 +27,8 @@ interface AgentTask {
   title: string;
   description: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
+  workStatus?: 'pending' | 'running' | 'blocked' | 'done' | 'failed';
+  blockedReason?: { code: string; message: string };
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -34,6 +36,10 @@ interface AgentTask {
   result?: string;
   artifact?: AgentTaskArtifact;
   error?: string;
+  attempts?: number;
+  maxAttempts?: number;
+  retryable?: boolean;
+  events?: { at: string; type: string; detail: string }[];
 }
 
 interface TaskStats {
@@ -42,16 +48,30 @@ interface TaskStats {
   running: number;
   completed: number;
   failed: number;
+  pending: number;
+  blocked: number;
+  done: number;
+}
+
+function taskWorkStatus(task: AgentTask): NonNullable<AgentTask['workStatus']> {
+  if (task.workStatus) return task.workStatus;
+  if (task.status === 'completed') return 'done';
+  if (task.status === 'running') return 'running';
+  if (task.status === 'queued') return 'pending';
+  return 'failed';
 }
 
 export const BastillaOS2View: React.FC = () => {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [stats, setStats] = useState<TaskStats>({ total: 0, queued: 0, running: 0, completed: 0, failed: 0 });
-  const [filter, setFilter] = useState<'all' | 'running' | 'completed' | 'failed'>('all');
+  const [stats, setStats] = useState<TaskStats>({ total: 0, queued: 0, running: 0, completed: 0, failed: 0, pending: 0, blocked: 0, done: 0 });
+  const [filter, setFilter] = useState<'all' | 'pending' | 'running' | 'blocked' | 'done' | 'failed'>('all');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [runningAction, setRunningAction] = useState(false);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [taskAccessError, setTaskAccessError] = useState('');
+  const [retryError, setRetryError] = useState('');
 
   // Form state
   const [agent, setAgent] = useState<'Alex' | 'Astyria' | 'Aurelius' | 'Aria'>('Astyria');
@@ -63,21 +83,39 @@ export const BastillaOS2View: React.FC = () => {
   const [runError, setRunError] = useState('');
 
   const fetchTasks = useCallback(async () => {
+    if (!taskToken.trim()) {
+      setLoading(false);
+      setTasks([]);
+      setStats({ total: 0, queued: 0, running: 0, completed: 0, failed: 0, pending: 0, blocked: 0, done: 0 });
+      setTaskAccessError('Wprowadź token, aby wyświetlić chroniony rejestr zadań.');
+      return;
+    }
     try {
-      const res = await fetch('/api/agent-tasks', { cache: 'no-store' });
+      const res = await fetch('/api/agent-tasks', {
+        cache: 'no-store',
+        headers: { Authorization: 'Bearer ' + taskToken.trim() },
+      });
       if (res.ok) {
         const data = await res.json();
         setTasks(data.tasks || []);
+        setTaskAccessError('');
         if (data.stats) {
           setStats(data.stats);
         }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setTasks([]);
+        setStats({ total: 0, queued: 0, running: 0, completed: 0, failed: 0, pending: 0, blocked: 0, done: 0 });
+        setTaskAccessError(data.error || `Nie można odczytać rejestru (HTTP ${res.status}).`);
       }
-    } catch (e) {
-      console.warn('Błąd pobierania zadań agentów:', e);
+    } catch {
+      setTasks([]);
+      setStats({ total: 0, queued: 0, running: 0, completed: 0, failed: 0, pending: 0, blocked: 0, done: 0 });
+      setTaskAccessError('Nie można połączyć się z serwerem zadań.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [taskToken]);
 
   useEffect(() => {
     void fetchTasks();
@@ -140,9 +178,33 @@ export const BastillaOS2View: React.FC = () => {
     }
   };
 
+  const handleRetryTask = async (id: string) => {
+    setRetryingId(id);
+    setRetryError('');
+    try {
+      const res = await fetch('/api/agent-tasks/retry', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + taskToken.trim(),
+        },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setRetryError(data.error || `Nie udało się ponowić zadania (HTTP ${res.status}).`);
+      }
+      await fetchTasks();
+    } catch {
+      setRetryError('Nie można połączyć się z serwerem zadań.');
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   const filteredTasks = tasks.filter((t) => {
     if (filter === 'all') return true;
-    return t.status === filter;
+    return taskWorkStatus(t) === filter;
   });
 
   return (
@@ -197,6 +259,22 @@ export const BastillaOS2View: React.FC = () => {
 
       {/* Main Container */}
       <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6 flex-1">
+        <section className="rounded-xl border border-[#E6DCB8] bg-white p-4">
+          <label htmlFor="agent-task-access-token" className="block text-xs font-semibold text-[#594E3F]">
+            Token dostępu do rejestru zadań
+          </label>
+          <input
+            id="agent-task-access-token"
+            type="password"
+            autoComplete="off"
+            value={taskToken}
+            onChange={(event) => setTaskToken(event.target.value)}
+            className="mt-1 w-full max-w-xl px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612]"
+          />
+          {taskAccessError && <p role="status" className="mt-2 text-xs text-amber-800">{taskAccessError}</p>}
+          {retryError && <p role="alert" className="mt-2 text-xs text-red-800">{retryError}</p>}
+        </section>
+
         {/* Metric Cards Grid */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="p-4 rounded-xl bg-white border border-[#E6DCB8] shadow-xs flex flex-col justify-between">
@@ -208,10 +286,10 @@ export const BastillaOS2View: React.FC = () => {
             </div>
             <div className="mt-3 flex items-baseline justify-between">
               <span className="text-3xl font-extrabold text-[#1A1612] font-mono tabular-nums">{stats.total}</span>
-              <span className="text-xs text-emerald-700 font-semibold font-mono tabular-nums">{stats.completed} z artefaktem</span>
+              <span className="text-xs text-emerald-700 font-semibold font-mono tabular-nums">{stats.done} done z artefaktem</span>
             </div>
             <div className="text-[11px] text-[#8C7E6D] mt-2 border-t border-[#F0EAE1] pt-2">
-              Stan completed wymaga pliku na dysku.
+              Stan done wymaga pliku na dysku.
             </div>
           </div>
 
@@ -224,7 +302,7 @@ export const BastillaOS2View: React.FC = () => {
             </div>
             <div className="mt-3 flex items-baseline justify-between">
               <span className="text-3xl font-extrabold text-[#C5A059] font-mono tabular-nums">{stats.running}</span>
-              <span className="text-xs text-[#736758] font-mono tabular-nums">{stats.queued} w kolejce</span>
+              <span className="text-xs text-[#736758] font-mono tabular-nums">{stats.pending} pending</span>
             </div>
             <div className="text-[11px] text-[#8C7E6D] mt-2 border-t border-[#F0EAE1] pt-2">
               Stan running wymaga aktywnego wykonawcy.
@@ -273,12 +351,12 @@ export const BastillaOS2View: React.FC = () => {
                 <span>Rzeczywisty Rejestr Zadań Agentów (Agent Task Registry)</span>
               </h2>
               <p className="text-xs text-[#736758] mt-0.5">
-                Stany: queued / running / completed / failed. Znaczniki czasu, logi i fizyczne artefakty.
+                Stany: pending / running / blocked / done / failed. Dziennik zdarzeń i fizyczne artefakty.
               </p>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-[#FAF7F0] p-1 rounded-lg border border-[#E6DCB8] text-xs">
-              {(['all', 'running', 'completed', 'failed'] as const).map((mode) => (
+            <div className="flex flex-wrap items-center gap-1.5 bg-[#FAF7F0] p-1 rounded-lg border border-[#E6DCB8] text-xs">
+              {(['all', 'pending', 'running', 'blocked', 'done', 'failed'] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setFilter(mode)}
@@ -289,8 +367,10 @@ export const BastillaOS2View: React.FC = () => {
                   }`}
                 >
                   {mode === 'all' && `Wszystkie (${tasks.length})`}
+                  {mode === 'pending' && `Oczekujące (${stats.pending})`}
                   {mode === 'running' && `W toku (${stats.running})`}
-                  {mode === 'completed' && `Ukończone (${stats.completed})`}
+                  {mode === 'blocked' && `Zablokowane (${stats.blocked})`}
+                  {mode === 'done' && `Ukończone (${stats.done})`}
                   {mode === 'failed' && `Błędy (${stats.failed})`}
                 </button>
               ))}
@@ -306,14 +386,16 @@ export const BastillaOS2View: React.FC = () => {
           ) : (
             <div className="divide-y divide-[#F0EAE1]">
               {filteredTasks.map((task) => {
+                const status = taskWorkStatus(task);
                 const statusStyles = {
-                  completed: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+                  done: 'bg-emerald-50 text-emerald-800 border-emerald-200',
                   running: 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse',
-                  queued: 'bg-blue-50 text-blue-800 border-blue-200',
+                  pending: 'bg-blue-50 text-blue-800 border-blue-200',
+                  blocked: 'bg-orange-50 text-orange-800 border-orange-200',
                   failed: 'bg-red-50 text-red-800 border-red-200',
-                }[task.status];
+                }[status];
 
-                const isRunning = task.status === 'running' || task.status === 'queued';
+                const isRunning = status === 'running' || status === 'pending';
 
                 return (
                   <div key={task.id} className="p-5 hover:bg-[#FAF7F0]/60 transition space-y-3">
@@ -322,13 +404,13 @@ export const BastillaOS2View: React.FC = () => {
                         <div className="flex items-center gap-2.5">
                           <span className="text-sm font-bold text-[#1A1612]">{task.title}</span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${statusStyles}`}>
-                            {task.status.toUpperCase()}
+                            {status.toUpperCase()}
                           </span>
                         </div>
                         <p className="text-xs text-[#594E3F]">{task.description}</p>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         <span className="px-2 py-1 rounded bg-[#FAF7F0] border border-[#D9C38B] text-xs font-semibold text-[#736758]">
                           {task.agent}
                         </span>
@@ -342,9 +424,24 @@ export const BastillaOS2View: React.FC = () => {
                             <span>{cancelingId === task.id ? '…' : 'Przerwij'}</span>
                           </button>
                         )}
+                        {task.retryable && (
+                          <button
+                            onClick={() => void handleRetryTask(task.id)}
+                            disabled={retryingId === task.id}
+                            className="px-2 py-1 rounded text-xs text-blue-800 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>{retryingId === task.id ? '…' : 'Ponów'}</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
+                    {status === 'blocked' && task.blockedReason && (
+                      <div className="text-xs text-orange-900 bg-orange-50 p-2.5 rounded-lg border border-orange-200">
+                        <span className="font-semibold">Blokada ({task.blockedReason.code}):</span> {task.blockedReason.message}
+                      </div>
+                    )}
                     {/* Artifact info */}
                     {task.artifact && (
                       <div className="flex items-center justify-between text-xs p-2.5 rounded-lg bg-[#FAF7F0] border border-[#E6DCB8]">
@@ -377,11 +474,14 @@ export const BastillaOS2View: React.FC = () => {
                       <summary className="cursor-pointer hover:text-[#1A1612] select-none text-[11px] font-medium flex items-center gap-1">
                         <Terminal className="w-3 h-3" />
                         <span>
-                          Dziennik zdarzeń ({task.logs.length} wpisów) · Utworzono:{' '}
+                          Dziennik zdarzeń ({task.events?.length || task.logs.length} wpisów) · Utworzono:{' '}
                           {new Date(task.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </span>
                       </summary>
                       <div className="mt-2 p-3 rounded-lg bg-[#FAF7F0] border border-[#E6DCB8] font-mono text-[11px] max-h-36 overflow-y-auto space-y-1 text-[#40382E]">
+                        {(task.events || []).map((event, i) => (
+                          <div key={`event-${i}`}>[{event.at}] {event.type}: {event.detail}</div>
+                        ))}
                         {task.logs.map((log, i) => (
                           <div key={i}>{log}</div>
                         ))}
@@ -439,6 +539,7 @@ export const BastillaOS2View: React.FC = () => {
             </div>
 
             <form onSubmit={handleRunTask} className="space-y-3.5 text-xs">
+              {!taskToken && (
               <div>
                 <label className="block font-medium text-[#594E3F] mb-1" htmlFor="agent-task-token">Token operacji agentów</label>
                 <input
@@ -451,6 +552,7 @@ export const BastillaOS2View: React.FC = () => {
                   className="w-full px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612]"
                 />
               </div>
+              )}
 
               <div>
                 <label className="block font-medium text-[#594E3F] mb-1">Wykonawca w Triadzie</label>

@@ -1,20 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { agentTaskRegistry } from '../src/kernel/agentTasks.ts';
+import { AgentTaskRegistry, agentTaskRegistry } from '../src/kernel/agentTasks.ts';
 
-test('AgentTaskRegistry: lists initial verified tasks with real artifacts', () => {
-  const tasks = agentTaskRegistry.getAll();
-  assert.ok(Array.isArray(tasks));
-  assert.ok(tasks.length > 0);
+function isolatedRegistry() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bastilla-work-'));
+  const storagePath = path.join(directory, 'agent_tasks.json');
+  return {
+    registry: new AgentTaskRegistry(storagePath),
+    storagePath,
+    cleanup: () => fs.rmSync(directory, { recursive: true, force: true }),
+  };
+}
 
-  for (const t of tasks) {
-    if (t.status === 'completed') {
-      assert.ok(t.artifact, `Task ${t.id} completed must have artifact`);
-      assert.ok(fs.existsSync(path.resolve(t.artifact.path)), `Artifact ${t.artifact.path} must exist on disk`);
-      assert.ok(t.artifact.sizeBytes >= 0, 'Artifact size must be non-negative');
-    }
+async function waitForStatus(registry, id, statuses) {
+  for (let i = 0; i < 80; i++) {
+    const task = registry.getById(id);
+    if (task && statuses.includes(task.workStatus)) return task;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return registry.getById(id);
+}
+
+test('AgentTaskRegistry: new registry does not seed fictitious agent completions', () => {
+  const { registry, cleanup } = isolatedRegistry();
+  try {
+    assert.deepEqual(registry.getAll(), []);
+    assert.equal(registry.getStats().total, 0);
+  } finally {
+    cleanup();
   }
 });
 
@@ -128,4 +144,156 @@ test('AgentTaskRegistry: unsupported action fails instead of producing a fake di
   assert.equal(finished?.status, 'failed');
   assert.match(finished.error, /Nieobsługiwany typ akcji/);
   assert.equal(finished.artifact, undefined);
+});
+
+test('AgentTaskRegistry: file actions reject path traversal identifiers', async () => {
+  const { registry, cleanup } = isolatedRegistry();
+  try {
+    for (const payload of [
+      { appId: '../outside', filename: 'safe.json', content: '{}' },
+      { appId: 'safe-app', filename: '../outside.json', content: '{}' },
+    ]) {
+      const task = await registry.runTask({
+        agent: 'Alex',
+        title: 'Odrzucona ścieżka',
+        description: 'Nie wolno zapisywać poza katalogiem aplikacji.',
+        actionType: 'write_app_file',
+        payload,
+      });
+      const failed = await waitForStatus(registry, task.id, ['failed']);
+      assert.match(failed.error, /Nieprawidłow/);
+      assert.equal(failed.artifact, undefined);
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test('AgentTaskRegistry: restart recovery blocks interrupted work with a concrete reason', async () => {
+  const { registry, storagePath, cleanup } = isolatedRegistry();
+  let release;
+  let taskId;
+  try {
+    const task = await registry.runTask({
+      agent: 'Aria',
+      title: 'Przerwane zadanie',
+      description: 'Nie wolno automatycznie powtórzyć pracy po restarcie.',
+      actionType: 'ai_task',
+      aiExecutor: async () => new Promise((resolve) => { release = resolve; }),
+    });
+    taskId = task.id;
+    const running = await waitForStatus(registry, task.id, ['running']);
+    assert.equal(running.workStatus, 'running');
+
+    const recovered = new AgentTaskRegistry(storagePath).getById(task.id);
+    assert.equal(recovered.workStatus, 'blocked');
+    assert.equal(recovered.blockedReason.code, 'RESTART_RECOVERY');
+    assert.match(recovered.blockedReason.message, /ręcznego ponowienia/);
+    assert.ok(recovered.events.some((event) => event.type === 'blocked'));
+  } finally {
+    if (taskId) registry.cancel(taskId);
+    release?.({ text: 'should not be saved', provider: 'test', model: 'test' });
+    if (taskId) await waitForStatus(registry, taskId, ['failed']);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    cleanup();
+  }
+});
+
+test('AgentTaskRegistry: retry preserves task identity and records a bounded attempt', async () => {
+  const { registry, cleanup } = isolatedRegistry();
+  let executions = 0;
+  let artifactPath;
+  const executor = async () => {
+    executions++;
+    if (executions === 1) throw new Error('temporary provider failure');
+    return { text: 'Retry completed.', provider: 'test-provider', model: 'test-model' };
+  };
+  try {
+    const task = await registry.runTask({
+      agent: 'Aria',
+      title: 'Ponawialne zadanie',
+      description: 'Test kontrolowanego ponowienia.',
+      actionType: 'ai_task',
+      aiExecutor: executor,
+    });
+    const failed = await waitForStatus(registry, task.id, ['failed']);
+    assert.equal(failed.error, 'temporary provider failure');
+
+    const retry = registry.retry(task.id, executor);
+    assert.equal(retry.id, task.id);
+    assert.equal(retry.attempts, 2);
+    const done = await waitForStatus(registry, task.id, ['done']);
+    assert.equal(done.workStatus, 'done');
+    assert.equal(executions, 2);
+    assert.ok(done.events.some((event) => event.type === 'retry'));
+    artifactPath = path.resolve(done.artifact.path);
+  } finally {
+    if (artifactPath) fs.rmSync(artifactPath, { force: true });
+    cleanup();
+  }
+});
+
+test('AgentTaskRegistry: cancellation cannot be overwritten by a late executor result', async () => {
+  const { registry, cleanup } = isolatedRegistry();
+  let release;
+  let artifactPath;
+  try {
+    const task = await registry.runTask({
+      agent: 'Aria',
+      title: 'Anulowane zadanie',
+      description: 'Późna odpowiedź nie może zmienić stanu.',
+      actionType: 'ai_task',
+      aiExecutor: async () => new Promise((resolve) => { release = resolve; }),
+    });
+    await waitForStatus(registry, task.id, ['running']);
+    assert.equal(registry.cancel(task.id), true);
+    release({ text: 'late result', provider: 'test-provider', model: 'test-model' });
+
+    const failed = await waitForStatus(registry, task.id, ['failed']);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const finalTask = registry.getById(task.id);
+    assert.equal(finalTask.workStatus, 'failed');
+    assert.match(finalTask.error, /anulowane przez operatora/);
+    assert.equal(finalTask.artifact, undefined);
+    assert.equal(registry.cancel(task.id), false);
+    assert.ok(finalTask.events.some((event) => event.type === 'cancelled'));
+    artifactPath = failed.artifact?.path && path.resolve(failed.artifact.path);
+  } finally {
+    release?.({ text: 'late result', provider: 'test-provider', model: 'test-model' });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    if (artifactPath) fs.rmSync(artifactPath, { force: true });
+    cleanup();
+  }
+});
+
+test('AgentTaskRegistry: serial queue supports cancelling a pending task', async () => {
+  const { registry, cleanup } = isolatedRegistry();
+  let release;
+  try {
+    const active = await registry.runTask({
+      agent: 'Aria',
+      title: 'Aktywne zadanie',
+      description: 'Zajmuje jedyny slot.',
+      actionType: 'ai_task',
+      aiExecutor: async () => new Promise((resolve) => { release = resolve; }),
+    });
+    await waitForStatus(registry, active.id, ['running']);
+    const pending = await registry.runTask({
+      agent: 'Alex',
+      title: 'Oczekujące zadanie',
+      description: 'Pozostaje w kolejce.',
+      actionType: 'ai_task',
+      aiExecutor: async () => ({ text: 'unused', provider: 'test', model: 'test' }),
+    });
+    assert.equal(registry.getById(pending.id).workStatus, 'pending');
+    assert.equal(registry.cancel(pending.id), true);
+    assert.equal(registry.getById(pending.id).workStatus, 'failed');
+    assert.ok(registry.getById(pending.id).events.some((event) => event.type === 'cancelled'));
+    registry.cancel(active.id);
+    release({ text: 'cancelled', provider: 'test-provider', model: 'test-model' });
+    await waitForStatus(registry, active.id, ['failed']);
+  } finally {
+    release?.({ text: 'cancelled', provider: 'test-provider', model: 'test-model' });
+    cleanup();
+  }
 });

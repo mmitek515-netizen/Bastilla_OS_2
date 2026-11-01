@@ -1,10 +1,19 @@
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 
 export interface AgentTaskArtifact {
   path: string;
   name: string;
   sizeBytes: number;
+}
+
+export type AgentTaskWorkStatus = 'pending' | 'running' | 'blocked' | 'done' | 'failed';
+
+export interface AgentTaskEvent {
+  at: string;
+  type: 'created' | 'started' | 'blocked' | 'completed' | 'failed' | 'cancelled' | 'retry';
+  detail: string;
 }
 
 export interface AgentTask {
@@ -13,6 +22,8 @@ export interface AgentTask {
   title: string;
   description: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
+  workStatus?: AgentTaskWorkStatus;
+  blockedReason?: { code: string; message: string };
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -20,15 +31,63 @@ export interface AgentTask {
   result?: string;
   artifact?: AgentTaskArtifact;
   error?: string;
+  attempts?: number;
+  maxAttempts?: number;
+  events?: AgentTaskEvent[];
+  actionType?: string;
+  payload?: Record<string, unknown>;
+  retryable?: boolean;
 }
+
+type AgentTaskAiExecutor = (
+  task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
+  signal: AbortSignal,
+) => Promise<{ text: string; provider: string; model: string }>;
 
 const TASKS_STORAGE_PATH = path.resolve('data', 'agent_tasks.json');
 
-function ensureDataDir(): void {
-  const dir = path.dirname(TASKS_STORAGE_PATH);
+function ensureDataDir(storagePath: string): void {
+  const dir = path.dirname(storagePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+}
+
+const RESTART_BLOCK = {
+  code: 'RESTART_RECOVERY',
+  message: 'Serwer uruchomił się ponownie; zadanie wymaga ręcznego ponowienia.',
+};
+
+function getWorkStatus(task: AgentTask): AgentTaskWorkStatus {
+  if (task.workStatus) return task.workStatus;
+  if (task.status === 'completed') return 'done';
+  if (task.status === 'running') return 'running';
+  if (task.status === 'queued') return 'pending';
+  return 'failed';
+}
+
+function publicTask(task: AgentTask): AgentTask {
+  const { actionType: _actionType, payload: _payload, ...visibleTask } = task;
+  return {
+    ...visibleTask,
+    retryable: Boolean(task.actionType)
+      && (getWorkStatus(task) === 'failed' || getWorkStatus(task) === 'blocked')
+      && (task.attempts || 1) < (task.maxAttempts || 3),
+  };
+}
+
+function validateAppId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value)) {
+    throw new Error('Nieprawidłowy identyfikator aplikacji.');
+  }
+  return value;
+}
+
+function validateAppFilename(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
+    throw new Error('Nieprawidłowa nazwa pliku aplikacji.');
+  }
+  return value;
 }
 
 /**
@@ -43,6 +102,7 @@ function verifyTaskArtifact(task: AgentTask): AgentTask {
       return {
         ...task,
         status: 'failed',
+        workStatus: 'failed',
         error: 'Stan ukończony wymaga powiązanego pliku artefaktu.',
       };
     }
@@ -51,6 +111,7 @@ function verifyTaskArtifact(task: AgentTask): AgentTask {
       return {
         ...task,
         status: 'failed',
+        workStatus: 'failed',
         error: `Brak pliku artefaktu na dysku: ${task.artifact.path}`,
       };
     }
@@ -59,12 +120,14 @@ function verifyTaskArtifact(task: AgentTask): AgentTask {
       task.artifact.sizeBytes = stats.size;
       if (task.status === 'failed') {
         task.status = 'completed';
+        task.workStatus = 'done';
         delete task.error;
       }
     } catch {
       return {
         ...task,
         status: 'failed',
+        workStatus: 'failed',
         error: `Błąd odczytu parametrów pliku: ${task.artifact.path}`,
       };
     }
@@ -73,6 +136,7 @@ function verifyTaskArtifact(task: AgentTask): AgentTask {
 }
 
 function seedDefaultTasks(): AgentTask[] {
+  return [];
   const now = new Date().toISOString();
   const tasks: AgentTask[] = [
     {
@@ -165,101 +229,179 @@ function seedDefaultTasks(): AgentTask[] {
   return tasks.map(verifyTaskArtifact);
 }
 
-class AgentTaskRegistry {
+export class AgentTaskRegistry {
   private tasks: Map<string, AgentTask> = new Map();
   private runningExecutors: Map<string, AbortController> = new Map();
+  private taskExecutors: Map<string, AgentTaskAiExecutor | undefined> = new Map();
+  private readonly storagePath: string;
 
-  constructor() {
+  constructor(storagePath = TASKS_STORAGE_PATH) {
+    this.storagePath = path.resolve(storagePath);
     this.loadFromDisk();
   }
 
   private loadFromDisk(): void {
-    ensureDataDir();
-    if (fs.existsSync(TASKS_STORAGE_PATH)) {
+    ensureDataDir(this.storagePath);
+    if (fs.existsSync(this.storagePath)) {
       try {
-        const raw = fs.readFileSync(TASKS_STORAGE_PATH, 'utf-8');
+        const raw = fs.readFileSync(this.storagePath, 'utf-8');
         const list = JSON.parse(raw);
-        if (Array.isArray(list)) {
-          this.tasks.clear();
-          for (const item of list) {
-            if (item && item.id) {
-              this.tasks.set(item.id, verifyTaskArtifact(item));
-            }
+        if (!Array.isArray(list)) throw new Error('Rejestr zadań musi być tablicą.');
+        for (const item of list) {
+          if (!item || typeof item.id !== 'string') continue;
+          const task = verifyTaskArtifact(item);
+          task.workStatus = getWorkStatus(task);
+          task.events ||= [];
+          task.attempts ||= 1;
+          task.maxAttempts ||= 3;
+          if (task.workStatus === 'pending' || task.workStatus === 'running') {
+            task.status = 'failed';
+            task.workStatus = 'blocked';
+            task.blockedReason = RESTART_BLOCK;
+            task.error = RESTART_BLOCK.message;
+            task.completedAt = new Date().toISOString();
+            task.logs.push(`[${task.completedAt}] ${RESTART_BLOCK.message}`);
+            task.events.push({ at: task.completedAt, type: 'blocked', detail: RESTART_BLOCK.message });
           }
-          return;
+          this.tasks.set(task.id, task);
         }
+        this.saveToDisk();
+        return;
       } catch (err) {
-        console.warn('[AGENT_TASKS] Błąd wczytywania rejestru zadań:', err);
+        console.error('[AGENT_TASKS] Nie można bezpiecznie wczytać rejestru zadań:', err);
+        throw err;
       }
     }
 
-    // Seed default tasks
-    const defaults = seedDefaultTasks();
-    for (const t of defaults) {
-      this.tasks.set(t.id, t);
-    }
     this.saveToDisk();
   }
 
   private saveToDisk(): void {
-    ensureDataDir();
+    ensureDataDir(this.storagePath);
+    const temporaryPath = `${this.storagePath}.${process.pid}.${randomUUID()}.tmp`;
     try {
       const list = Array.from(this.tasks.values());
-      fs.writeFileSync(TASKS_STORAGE_PATH, JSON.stringify(list, null, 2), 'utf-8');
+      fs.writeFileSync(temporaryPath, JSON.stringify(list, null, 2), { encoding: 'utf-8', mode: 0o600 });
+      fs.renameSync(temporaryPath, this.storagePath);
     } catch (err) {
-      console.error('[AGENT_TASKS] Błąd zapisu rejestru zadań:', err);
+      fs.rmSync(temporaryPath, { force: true });
+      throw err;
     }
   }
 
   public getAll(): AgentTask[] {
-    const list = Array.from(this.tasks.values()).map(verifyTaskArtifact);
-    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const list = Array.from(this.tasks.values())
+      .map((task) => publicTask(verifyTaskArtifact(task)))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return list;
   }
 
-  public getStats(): { total: number; queued: number; running: number; completed: number; failed: number } {
+  public getStats(): {
+    total: number;
+    queued: number;
+    running: number;
+    completed: number;
+    failed: number;
+    pending: number;
+    blocked: number;
+    done: number;
+  } {
     const all = this.getAll();
+    const count = (status: AgentTaskWorkStatus) => all.filter((task) => getWorkStatus(task) === status).length;
     return {
       total: all.length,
-      queued: all.filter((t) => t.status === 'queued').length,
-      running: all.filter((t) => t.status === 'running').length,
-      completed: all.filter((t) => t.status === 'completed').length,
-      failed: all.filter((t) => t.status === 'failed').length,
+      queued: count('pending'),
+      running: count('running'),
+      completed: count('done'),
+      failed: count('failed'),
+      pending: count('pending'),
+      blocked: count('blocked'),
+      done: count('done'),
     };
   }
 
   public getById(id: string): AgentTask | undefined {
     const task = this.tasks.get(id);
-    return task ? verifyTaskArtifact(task) : undefined;
+    return task ? publicTask(verifyTaskArtifact(task)) : undefined;
   }
 
   public cancel(id: string): boolean {
     const task = this.tasks.get(id);
     if (!task) return false;
 
-    if (task.status === 'running') {
-      const controller = this.runningExecutors.get(id);
-      if (controller) {
-        controller.abort();
-        this.runningExecutors.delete(id);
-      }
-      task.status = 'failed';
-      task.error = 'Zadanie przerwane przez operatora.';
-      task.completedAt = new Date().toISOString();
-      task.logs.push(`[${new Date().toISOString()}] Zadanie zostało anulowane przez operatora.`);
-      this.saveToDisk();
-      return true;
+    const workStatus = getWorkStatus(task);
+    if (workStatus !== 'running' && workStatus !== 'pending') return false;
+
+    this.runningExecutors.get(id)?.abort();
+    this.taskExecutors.delete(id);
+    task.status = 'failed';
+    task.workStatus = 'failed';
+    task.error = 'Zadanie anulowane przez operatora.';
+    task.completedAt = new Date().toISOString();
+    task.logs.push(`[${task.completedAt}] ${task.error}`);
+    task.events ||= [];
+    task.events.push({ at: task.completedAt, type: 'cancelled', detail: task.error });
+    this.saveToDisk();
+    return true;
+  }
+
+  public retry(
+    id: string,
+    aiExecutor?: AgentTaskAiExecutor,
+  ): AgentTask | undefined {
+    const task = this.tasks.get(id);
+    if (!task || (getWorkStatus(task) !== 'failed' && getWorkStatus(task) !== 'blocked')
+      || this.runningExecutors.has(id) || !task.actionType
+      || (task.attempts || 1) >= (task.maxAttempts || 3)) {
+      return undefined;
     }
 
-    if (task.status === 'queued') {
+    task.attempts = (task.attempts || 1) + 1;
+    task.status = 'queued';
+    task.workStatus = 'pending';
+    task.startedAt = undefined;
+    task.completedAt = undefined;
+    task.result = undefined;
+    task.artifact = undefined;
+    task.error = undefined;
+    task.blockedReason = undefined;
+    const now = new Date().toISOString();
+    task.logs.push(`[${now}] Ponowienie zadania (próba ${task.attempts}/${task.maxAttempts || 3}).`);
+    task.events ||= [];
+    task.events.push({ at: now, type: 'retry', detail: `Próba ${task.attempts}/${task.maxAttempts || 3}.` });
+    this.saveToDisk();
+    this.taskExecutors.set(task.id, aiExecutor);
+    this.processNext();
+    return publicTask(task);
+  }
+
+  private processNext(): void {
+    if (this.runningExecutors.size > 0) return;
+    const task = Array.from(this.tasks.values())
+      .filter((item) => getWorkStatus(item) === 'pending')
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+    if (!task || !task.actionType) return;
+
+    const aiExecutor = this.taskExecutors.get(task.id);
+    if (task.actionType === 'ai_task' && !aiExecutor) {
+      const now = new Date().toISOString();
       task.status = 'failed';
-      task.error = 'Zadanie wycofane z kolejki.';
-      task.completedAt = new Date().toISOString();
-      task.logs.push(`[${new Date().toISOString()}] Zadanie wycofane z kolejki.`);
+      task.workStatus = 'blocked';
+      task.blockedReason = {
+        code: 'AI_EXECUTOR_UNAVAILABLE',
+        message: 'Brak dostępnego wykonawcy modelu AI; zadanie wymaga ręcznego ponowienia.',
+      };
+      task.error = task.blockedReason.message;
+      task.completedAt = now;
+      task.logs.push(`[${now}] ${task.blockedReason.message}`);
+      task.events ||= [];
+      task.events.push({ at: now, type: 'blocked', detail: task.blockedReason.message });
       this.saveToDisk();
-      return true;
+      this.processNext();
+      return;
     }
 
-    return false;
+    void this.executeTask(task.id, task.actionType, task.payload, aiExecutor);
   }
 
   /**
@@ -274,10 +416,7 @@ class AgentTaskRegistry {
     description: string;
     actionType: string;
     payload?: Record<string, any>;
-    aiExecutor?: (
-      task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
-      signal: AbortSignal,
-    ) => Promise<{ text: string; provider: string; model: string }>;
+    aiExecutor?: AgentTaskAiExecutor;
   }): Promise<AgentTask> {
     const taskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
@@ -288,27 +427,30 @@ class AgentTaskRegistry {
       title: params.title,
       description: params.description,
       status: 'queued',
+      workStatus: 'pending',
       createdAt: now,
       logs: [`[${now}] Zadanie zarejestrowane w kolejce.`],
+      attempts: 1,
+      maxAttempts: 3,
+      events: [{ at: now, type: 'created', detail: 'Zadanie zarejestrowane w kolejce.' }],
+      actionType: params.actionType,
+      payload: params.payload,
     };
 
     this.tasks.set(taskId, task);
     this.saveToDisk();
 
-    // Start execution asynchronously
-    void this.executeTask(taskId, params.actionType, params.payload, params.aiExecutor);
+    this.taskExecutors.set(taskId, params.aiExecutor);
+    this.processNext();
 
-    return task;
+    return publicTask(task);
   }
 
   private async executeTask(
     taskId: string,
     actionType: string,
     payload: Record<string, any> = {},
-    aiExecutor?: (
-      task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
-      signal: AbortSignal,
-    ) => Promise<{ text: string; provider: string; model: string }>,
+    aiExecutor?: AgentTaskAiExecutor,
   ): Promise<void> {
     const task = this.tasks.get(taskId);
     if (!task) return;
@@ -316,27 +458,44 @@ class AgentTaskRegistry {
     const controller = new AbortController();
     this.runningExecutors.set(taskId, controller);
 
-    task.status = 'running';
-    task.startedAt = new Date().toISOString();
-    task.logs.push(`[${task.startedAt}] Rozpoczęto wykonywanie zadania przez agenta ${task.agent}.`);
-    this.saveToDisk();
-
+    const throwIfAborted = () => {
+      if (controller.signal.aborted) throw new Error('Zadanie anulowane przez operatora.');
+    };
     const appendLog = (msg: string) => {
       task.logs.push(`[${new Date().toISOString()}] ${msg}`);
       this.saveToDisk();
     };
 
     try {
+      task.status = 'running';
+      task.workStatus = 'running';
+      task.startedAt = new Date().toISOString();
+      task.logs.push(`[${task.startedAt}] Rozpoczęto wykonywanie zadania przez agenta ${task.agent}.`);
+      task.events ||= [];
+      task.events.push({ at: task.startedAt, type: 'started', detail: `Agent ${task.agent} rozpoczął zadanie.` });
+      this.saveToDisk();
+
       if (controller.signal.aborted) {
         throw new Error('Przerwano przed rozpoczęciem.');
       }
 
       if (actionType === 'ai_task') {
         if (!aiExecutor) {
-          throw new Error('Brak wykonawcy modelu AI dla tego zadania.');
+          task.status = 'failed';
+          task.workStatus = 'blocked';
+          task.blockedReason = {
+            code: 'AI_EXECUTOR_UNAVAILABLE',
+            message: 'Brak dostępnego wykonawcy modelu AI; zadanie wymaga ręcznego ponowienia.',
+          };
+          task.error = task.blockedReason.message;
+          task.completedAt = new Date().toISOString();
+          task.logs.push(`[${task.completedAt}] ${task.blockedReason.message}`);
+          task.events.push({ at: task.completedAt, type: 'blocked', detail: task.blockedReason.message });
+          return;
         }
         appendLog('Wysyłanie zadania do skonfigurowanego modelu AI...');
         const response = await aiExecutor(task, controller.signal);
+        throwIfAborted();
         if (!response.text.trim()) {
           throw new Error('Model AI zwrócił pustą odpowiedź.');
         }
@@ -364,6 +523,7 @@ class AgentTaskRegistry {
       } else if (actionType === 'audit_system_integrity') {
         appendLog('Skanowanie spójności plików jądra i konfiguracji...');
         await new Promise((r) => setTimeout(r, 600));
+        throwIfAborted();
 
         const exportsDir = path.resolve('exports');
         if (!fs.existsSync(exportsDir)) {
@@ -393,9 +553,10 @@ class AgentTaskRegistry {
         };
         task.result = `Raport integralności wygenerowany pomyślnie (${task.artifact.sizeBytes} B).`;
       } else if (actionType === 'scaffold_app') {
-        const appId = payload.targetAppId || 'bastilla_os_2';
+        const appId = validateAppId(payload.targetAppId || 'bastilla_os_2');
         appendLog(`Weryfikacja/tworzenie struktury aplikacji apps/${appId}...`);
         await new Promise((r) => setTimeout(r, 400));
+        throwIfAborted();
 
         const appDir = path.resolve('apps', appId);
         if (!fs.existsSync(appDir)) {
@@ -427,8 +588,8 @@ class AgentTaskRegistry {
         };
         task.result = `Aplikacja ${appId} zweryfikowana. Manifest gotowy na dysku.`;
       } else if (actionType === 'write_app_file') {
-        const appId = payload.appId || 'bastilla_os_2';
-        const filename = payload.filename || 'config.json';
+        const appId = validateAppId(payload.appId || payload.targetAppId || 'bastilla_os_2');
+        const filename = validateAppFilename(payload.filename || 'config.json');
         const content = payload.content || JSON.stringify({ updated: true, agent: task.agent, timestamp: new Date().toISOString() }, null, 2);
 
         appendLog(`Zapisywanie pliku ${filename} do apps/${appId}...`);
@@ -485,7 +646,7 @@ class AgentTaskRegistry {
           agent: task.agent,
           title: task.title,
           timestamp: new Date().toISOString(),
-          systemStatus: 'ONLINE',
+          systemStatus: 'UNVERIFIED',
           completed: true,
         };
         fs.writeFileSync(diagPath, JSON.stringify(diag, null, 2), 'utf-8');
@@ -506,17 +667,44 @@ class AgentTaskRegistry {
         throw new Error('Wykonawca zakończył działanie, ale nie utworzył wymaganego pliku artefaktu.');
       }
 
+      throwIfAborted();
       task.status = 'completed';
-      task.completedAt = new Date().toISOString();
-      appendLog(`Zadanie zakończone sukcesem. Artefakt potwierdzony: ${task.artifact.path}`);
+      task.workStatus = 'done';
+      const completedAt = new Date().toISOString();
+      task.completedAt = completedAt;
+      task.blockedReason = undefined;
+      task.events.push({ at: completedAt, type: 'completed', detail: `Potwierdzono artefakt ${task.artifact!.path}.` });
+      appendLog(`Zadanie zakończone sukcesem. Artefakt potwierdzony: ${task.artifact!.path}`);
     } catch (err: any) {
-      task.status = 'failed';
-      task.error = err?.message || String(err);
-      task.completedAt = new Date().toISOString();
-      appendLog(`BŁĄD: ${task.error}`);
+      if (!controller.signal.aborted) {
+        task.status = 'failed';
+        task.workStatus = 'failed';
+        const errorMessage = err?.message || String(err);
+        task.error = errorMessage;
+        const failedAt = new Date().toISOString();
+        task.completedAt = failedAt;
+        task.events ||= [];
+        task.events.push({ at: failedAt, type: 'failed', detail: errorMessage });
+        task.logs.push(`[${failedAt}] BŁĄD: ${errorMessage}`);
+        try {
+          this.saveToDisk();
+        } catch (saveError) {
+          console.error('[AGENT_TASKS] Nie można zapisać stanu błędu zadania:', saveError);
+        }
+      }
     } finally {
       this.runningExecutors.delete(taskId);
-      this.saveToDisk();
+      this.taskExecutors.delete(taskId);
+      try {
+        this.saveToDisk();
+      } catch (err) {
+        console.error('[AGENT_TASKS] Nie można zapisać końcowego stanu zadania:', err);
+      }
+      try {
+        this.processNext();
+      } catch (err) {
+        console.error('[AGENT_TASKS] Nie można uruchomić następnego zadania:', err);
+      }
     }
   }
 }

@@ -6350,7 +6350,8 @@ function authorizeAgentTasks(req: express.Request, res: express.Response): boole
   return true;
 }
 
-app.get('/api/agent-tasks', (_req, res) => {
+app.get('/api/agent-tasks', (req, res) => {
+  if (!authorizeAgentTasks(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   return res.json({
     success: true,
@@ -6373,6 +6374,9 @@ app.post('/api/agent-tasks/run', async (req, res) => {
     if (typeof title !== 'string' || typeof description !== 'string' || !title.trim() || !description.trim()
       || title.length > 200 || description.length > 8000) {
       return res.status(400).json({ success: false, error: 'Tytuł lub opis zadania ma nieprawidłowy format albo długość.' });
+    }
+    if (targetAppId !== undefined && (typeof targetAppId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(targetAppId))) {
+      return res.status(400).json({ success: false, error: 'Nieprawidłowy identyfikator aplikacji.' });
     }
     const requestedAction = String(actionType || executionType || 'ai_task');
     const taskActions = ['ai_task', 'audit_system_integrity', 'scaffold_app', 'write_app_file', 'generic_diag'];
@@ -6413,6 +6417,29 @@ app.post('/api/agent-tasks/cancel', (req, res) => {
   }
   const success = agentTaskRegistry.cancel(id);
   return res.json({ success });
+});
+
+app.post('/api/agent-tasks/retry', (req, res) => {
+  if (!authorizeAgentTasks(req, res)) return;
+  const { id } = req.body;
+  if (typeof id !== 'string' || !id) {
+    return res.status(400).json({ success: false, error: 'Brak identyfikatora zadania.' });
+  }
+  const task = agentTaskRegistry.retry(id, async (input, signal) => {
+    const chatAgent: ChatAgentName = input.agent === 'Aria' ? 'si_1'
+      : input.agent === 'Operator' ? 'Alex' : input.agent;
+    const result = await generateWithChain(LLM_CHAIN_CONFIG, {
+      system: `${CHAT_AGENT_MISSIONS[chatAgent]} Odpowiadasz na jawne zadanie przekazane przez operatora. Nie masz narzędzi do wykonywania poleceń ani zapisu plików. Przygotuj konkretną analizę lub rezultat, ale nie deklaruj zmian ani działań, których serwer nie wykonał.`,
+      history: [],
+      message: `Tytuł: ${input.title}\n\nOpis zadania: ${input.description}`,
+      maxOutputTokens: 2048,
+    }, signal);
+    return { text: result.text, provider: result.provider, model: result.model };
+  });
+  if (!task) {
+    return res.status(409).json({ success: false, error: 'Zadania nie można ponowić: sprawdź stan i limit prób.' });
+  }
+  return res.json({ success: true, task });
 });
 
 // --- TRIADA MISSION BOOTSTRAP: BUILD_BEST_OS (ROOT RING-0 + AUTONOMIA W TLE) ---
@@ -6629,5 +6656,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
-

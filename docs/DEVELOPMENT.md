@@ -12,6 +12,18 @@ downloads and cancels obsolete runs on the same branch. Automatic Git synchroniz
 uses the same command before committing. It cannot resolve competing agent edits;
 use one writer per file and separate worktrees.
 
+## Bastilla Work MVP
+
+The existing agent-task API backs the first Work queue: task records and event history
+are atomically stored in `data/agent_tasks.json`. It is a single-server-process queue,
+not a multi-node scheduler; persistence lasts only while that data path is retained.
+Only one task executes at a time. After a restart, interrupted pending/running tasks
+become `blocked` with a reason and require an authenticated manual retry; side effects
+are never replayed automatically. Retry is limited to three attempts total. Read and
+mutating task endpoints require `BASTILLA_AGENT_TASKS_TOKEN`; `workStatus` exposes
+`pending`, `running`, `blocked`, `done` or `failed` while the legacy `status` field and
+API paths remain available for existing clients.
+
 ## Priority queue
 
 | Priority | Owner | Deliverable | Evidence |
