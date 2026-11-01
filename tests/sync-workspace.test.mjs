@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { register } from 'node:module';
-register('tsx', import.meta.url);
 const { getSyncPaths, SYNC_FOLDERS } = await import('../src/lib/syncWorkspace.ts');
 
 test('default paths are grouped under one root', () => {
