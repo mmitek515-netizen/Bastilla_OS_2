@@ -1,5 +1,6 @@
 import express from 'express';
 import { registerGptActions } from './src/lib/gptActions.mjs';
+import { createApiSecurity, parseAllowedOrigins, setAllowedCorsOrigin } from './src/lib/apiSecurity.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
@@ -150,6 +151,13 @@ const POLLINATIONS_API_KEY = rawEnvPollKey.startsWith('sk_')
   ? rawEnvPollKey
   : '';
 const app = express();
+const API_HOST = (process.env.BASTILLA_API_HOST || '127.0.0.1').trim();
+const API_SECURITY = createApiSecurity({
+  host: API_HOST,
+  token: process.env.BASTILLA_API_TOKEN,
+  isProduction: process.env.NODE_ENV === 'production',
+});
+const API_CORS_ORIGINS = parseAllowedOrigins(process.env.BASTILLA_CORS_ORIGINS);
 const portArgIndex = process.argv.indexOf('--port');
 const DEFAULT_PORT = Number(portArgIndex >= 0 ? process.argv[portArgIndex + 1] : process.env.PORT || 3000);
 const PORT = Number.isFinite(DEFAULT_PORT) && DEFAULT_PORT > 0 ? DEFAULT_PORT : 3000;
@@ -164,6 +172,7 @@ const requestedUploadLimit = Number(process.env.BASTILLA_UPLOAD_MAX_MB || 32);
 const uploadLimitMB = Number.isFinite(requestedUploadLimit)
   ? Math.max(1, Math.min(256, Math.floor(requestedUploadLimit)))
   : 32;
+app.use(API_SECURITY.middleware);
 app.use(express.json({ limit: `${uploadLimitMB}mb` }));
 app.use(express.urlencoded({ limit: `${uploadLimitMB}mb`, extended: true }));
 
@@ -6119,7 +6128,7 @@ app.get('/api/mcp/sse', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  setAllowedCorsOrigin(req, res, API_CORS_ORIGINS);
 
   const sessionId = randomUUID();
   const endpoint = `/api/mcp?sessionId=${sessionId}`;
@@ -6149,10 +6158,11 @@ registerGptActions(app, {
 
 // OpenAPI 3.0 schema for ChatGPT Custom GPT Actions
 app.get('/api/mcp/openapi.json', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  setAllowedCorsOrigin(req, res, API_CORS_ORIGINS);
   const origin = `${req.protocol}://${req.get('host')}`;
   return res.json({
     openapi: '3.0.0',
+    components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } },
     info: {
       title: 'BastillaOS - Astyria AI Kernel API',
       description: 'API dla ChatGPT do łączenia z hipernadzorcą Astyria, jądrem SVL oraz narzędziami naprawczymi BastillaOS.',
@@ -6162,6 +6172,7 @@ app.get('/api/mcp/openapi.json', (req, res) => {
     paths: {
       '/api/astyria/mission': {
         post: {
+          security: [{ bearerAuth: [] }],
           summary: 'Wykonaj polecenie lub misję naprawczą przez Astyrię',
           operationId: 'executeAstyriaMission',
           requestBody: {
@@ -6230,7 +6241,7 @@ app.get('/api/mcp/openapi.json', (req, res) => {
 
 // MCP JSON-RPC 2.0 endpoint (ChatGPT / Claude / Cursor MCP)
 app.all(['/api/mcp', '/mcp'], async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  setAllowedCorsOrigin(req, res, API_CORS_ORIGINS);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Protocol-Version, Mcp-Session-Id');
 
@@ -6590,9 +6601,9 @@ async function startServer() {
   }
 
   const bindServer = (port: number) => {
-    const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(port, API_HOST, () => {
       activeServerPort = port;
-      console.log(`[SVL-KERNEL] Server listening on http://0.0.0.0:${port}`);
+      console.log(`[SVL-KERNEL] Server listening on http://${API_HOST}:${port}`);
       if (usesOllama()) {
         // Rozgrzewka w tle: wagi modelu trafiają do pamięci, zanim padnie pierwsza wiadomość.
         void warmupOllama(LLM_CHAIN_CONFIG, AbortSignal.timeout(180000)).then((warm) => {
@@ -6629,5 +6640,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
-
