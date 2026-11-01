@@ -402,7 +402,7 @@ export default function App() {
   ) => {
     // /sync refreshes the authoritative kernel state and reports the actual scope.
     // It does NOT silently commit, push or deploy uncommitted project changes.
-    if (attachments.length === 0 && /^(?:\\/sync|sync|synchronizuj(?:\\s+ca(?:ł|l)\\w*\\s+aplikacj\\w*)?)\\s*[.!]?$/iu.test(message.trim())) {
+    if (attachments.length === 0 && /^(?:\/sync|sync|synchronizuj(?:\s+całą\s+aplikację|\s+cala\s+aplikacje)?)\s*[.!]?$/iu.test(message.trim())) {
       setIsAgentLoading(true);
       setAgentError(null);
       try {
