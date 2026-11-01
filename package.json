@@ -1,6 +1,6 @@
 {
   "name": "bastilla-os-2",
-  "description": "BastillaOS web interface, SVL kernel, AI agents and local/cloud model integrations.",
+  "description": "Bastilla OS 2 web interface, SVL kernel, AI agents and local/cloud model integrations.",
   "private": true,
   "version": "0.0.0",
   "type": "module",

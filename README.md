@@ -2,7 +2,7 @@
 
 Repozytorium główne: **mmitek515-netizen/Bastilla_OS_2**.
 
-Odtworzona baza aplikacji webowej BastillaOS, integracji AI/MCP i narzędzi
+Odtworzona baza aplikacji webowej Bastilla OS 2, integracji AI/MCP i narzędzi
 Debian/QEMU. Obecność konfiguracji VM lub profili AI nie oznacza ich uruchomienia.
 
 ## Uruchomienie
