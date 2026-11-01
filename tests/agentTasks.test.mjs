@@ -4,6 +4,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { agentTaskRegistry } from '../src/kernel/agentTasks.ts';
 
+async function waitForTerminalTask(id) {
+  for (let i = 0; i < 60; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const task = agentTaskRegistry.getById(id);
+    if (task && ['blocked', 'completed', 'failed'].includes(task.status)) return task;
+  }
+  return null;
+}
+
 test('AgentTaskRegistry: lists initial verified tasks with real artifacts', () => {
   const tasks = agentTaskRegistry.getAll();
   assert.ok(Array.isArray(tasks));
@@ -128,4 +137,93 @@ test('AgentTaskRegistry: unsupported action fails instead of producing a fake di
   assert.equal(finished?.status, 'failed');
   assert.match(finished.error, /Nieobsługiwany typ akcji/);
   assert.equal(finished.artifact, undefined);
+});
+
+test('AgentTaskRegistry: serializes execution and reports queued work', async () => {
+  let releaseFirst;
+  const firstExecutionGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const started = [];
+  const first = await agentTaskRegistry.runTask({
+    agent: 'Aria',
+    title: 'Pierwsze zadanie kolejki',
+    description: 'Sprawdź ograniczenie współbieżności.',
+    actionType: 'ai_task',
+    aiExecutor: async () => {
+      started.push('first');
+      await firstExecutionGate;
+      return { text: 'Pierwszy raport.', provider: 'test-provider', model: 'test-model' };
+    },
+  });
+  const second = await agentTaskRegistry.runTask({
+    agent: 'Aria',
+    title: 'Drugie zadanie kolejki',
+    description: 'Sprawdź kolejność wykonania.',
+    actionType: 'ai_task',
+    aiExecutor: async () => {
+      started.push('second');
+      return { text: 'Drugi raport.', provider: 'test-provider', model: 'test-model' };
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(started, ['first']);
+  assert.equal(agentTaskRegistry.getById(second.id).status, 'queued');
+
+  releaseFirst();
+  const [finishedFirst, finishedSecond] = await Promise.all([
+    waitForTerminalTask(first.id),
+    waitForTerminalTask(second.id),
+  ]);
+  assert.equal(finishedFirst?.status, 'completed');
+  assert.equal(finishedSecond?.status, 'completed');
+  assert.deepEqual(started, ['first', 'second']);
+  fs.rmSync(path.resolve(finishedFirst.artifact.path), { force: true });
+  fs.rmSync(path.resolve(finishedSecond.artifact.path), { force: true });
+});
+
+test('AgentTaskRegistry: blocks tasks that have no real AI executor', async () => {
+  const task = await agentTaskRegistry.runTask({
+    agent: 'Aria',
+    title: 'Brak wykonawcy AI',
+    description: 'Nie deklaruj uruchomienia modelu.',
+    actionType: 'ai_task',
+  });
+
+  const finished = await waitForTerminalTask(task.id);
+  assert.equal(finished?.status, 'blocked');
+  assert.match(finished.error, /Brak wykonawcy modelu AI/);
+});
+
+test('AgentTaskRegistry: rejects app path traversal before writing files', async () => {
+  const outsidePath = path.resolve(`agent-task-path-${Date.now()}.txt`);
+  const task = await agentTaskRegistry.runTask({
+    agent: 'Alex',
+    title: 'Próba zapisu poza aplikacją',
+    description: 'Ścieżka pliku nie może opuścić katalogu aplikacji.',
+    actionType: 'write_app_file',
+    payload: {
+      appId: 'bastilla_os_2',
+      filename: `../../${path.basename(outsidePath)}`,
+      content: 'must not be written',
+    },
+  });
+
+  const finished = await waitForTerminalTask(task.id);
+  assert.equal(finished?.status, 'failed');
+  assert.match(finished.error, /Nieprawidłowa nazwa pliku aplikacji/);
+  assert.equal(fs.existsSync(outsidePath), false);
+
+  const outsideAppPath = path.resolve(`agent-task-app-${Date.now()}`);
+  const appTraversal = await agentTaskRegistry.runTask({
+    agent: 'Alex',
+    title: 'Próba utworzenia aplikacji poza katalogiem',
+    description: 'Identyfikator aplikacji nie może zawierać ścieżki.',
+    actionType: 'scaffold_app',
+    payload: { targetAppId: `../../${path.basename(outsideAppPath)}` },
+  });
+
+  const finishedAppTraversal = await waitForTerminalTask(appTraversal.id);
+  assert.equal(finishedAppTraversal?.status, 'failed');
+  assert.match(finishedAppTraversal.error, /Nieprawidłowy identyfikator aplikacji/);
+  assert.equal(fs.existsSync(outsideAppPath), false);
 });

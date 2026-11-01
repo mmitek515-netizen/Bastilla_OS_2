@@ -12,7 +12,7 @@ export interface AgentTask {
   agent: 'Alex' | 'Astyria' | 'Aurelius' | 'Aria' | 'Operator';
   title: string;
   description: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -23,6 +23,60 @@ export interface AgentTask {
 }
 
 const TASKS_STORAGE_PATH = path.resolve('data', 'agent_tasks.json');
+const MAX_CONCURRENT_TASKS = 1;
+const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const APP_FILENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+interface QueuedTaskExecution {
+  taskId: string;
+  actionType: string;
+  payload?: Record<string, any>;
+  aiExecutor?: (
+    task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
+    signal: AbortSignal,
+  ) => Promise<{ text: string; provider: string; model: string }>;
+}
+
+function resolveAppDirectory(appId: unknown): string {
+  if (typeof appId !== 'string' || !APP_ID_PATTERN.test(appId)) {
+    throw new Error('Nieprawidłowy identyfikator aplikacji.');
+  }
+
+  const appsRoot = path.resolve('apps');
+  fs.mkdirSync(appsRoot, { recursive: true });
+  const realAppsRoot = fs.realpathSync(appsRoot);
+  const appDir = path.join(realAppsRoot, appId);
+  if (path.dirname(appDir) !== realAppsRoot) {
+    throw new Error('Ścieżka aplikacji wykracza poza katalog apps.');
+  }
+  if (!fs.existsSync(appDir)) {
+    fs.mkdirSync(appDir);
+  }
+
+  const realAppDir = fs.realpathSync(appDir);
+  if (!realAppDir.startsWith(`${realAppsRoot}${path.sep}`)) {
+    throw new Error('Katalog aplikacji wykracza poza katalog apps.');
+  }
+  if (!fs.statSync(realAppDir).isDirectory()) {
+    throw new Error('Ścieżka aplikacji nie jest katalogiem.');
+  }
+  return realAppDir;
+}
+
+function resolveAppFile(appDir: string, filename: unknown): string {
+  if (typeof filename !== 'string' || !APP_FILENAME_PATTERN.test(filename)) {
+    throw new Error('Nieprawidłowa nazwa pliku aplikacji.');
+  }
+
+  const filePath = path.join(appDir, filename);
+  if (path.dirname(filePath) !== appDir) {
+    throw new Error('Ścieżka pliku wykracza poza katalog aplikacji.');
+  }
+  if (fs.existsSync(filePath) && !fs.lstatSync(filePath).isFile()) {
+    throw new Error('Plik aplikacji musi być zwykłym plikiem.');
+  }
+  return filePath;
+}
 
 function ensureDataDir(): void {
   const dir = path.dirname(TASKS_STORAGE_PATH);
@@ -168,6 +222,8 @@ function seedDefaultTasks(): AgentTask[] {
 class AgentTaskRegistry {
   private tasks: Map<string, AgentTask> = new Map();
   private runningExecutors: Map<string, AbortController> = new Map();
+  private executionQueue: QueuedTaskExecution[] = [];
+  private activeExecutionCount = 0;
 
   constructor() {
     this.loadFromDisk();
@@ -181,11 +237,26 @@ class AgentTaskRegistry {
         const list = JSON.parse(raw);
         if (Array.isArray(list)) {
           this.tasks.clear();
+          let recoveredInterruptedTasks = false;
           for (const item of list) {
             if (item && item.id) {
-              this.tasks.set(item.id, verifyTaskArtifact(item));
+              const task = verifyTaskArtifact(item);
+              if (task.status === 'running') {
+                task.status = 'failed';
+                task.error = 'Proces serwera zakończył się podczas wykonywania zadania; wymagane ponowne zlecenie.';
+                task.completedAt = new Date().toISOString();
+                task.logs.push(`[${task.completedAt}] Zadanie przerwane po restarcie serwera.`);
+                recoveredInterruptedTasks = true;
+              } else if (task.status === 'queued') {
+                task.status = 'blocked';
+                task.error = 'Zadanie oczekuje na ponowne zlecenie po restarcie serwera.';
+                task.logs.push(`[${new Date().toISOString()}] Wykonanie wymaga ponownego zlecenia po restarcie serwera.`);
+                recoveredInterruptedTasks = true;
+              }
+              this.tasks.set(item.id, task);
             }
           }
+          if (recoveredInterruptedTasks) this.saveToDisk();
           return;
         }
       } catch (err) {
@@ -216,12 +287,13 @@ class AgentTaskRegistry {
     return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  public getStats(): { total: number; queued: number; running: number; completed: number; failed: number } {
+  public getStats(): { total: number; queued: number; running: number; blocked: number; completed: number; failed: number } {
     const all = this.getAll();
     return {
       total: all.length,
       queued: all.filter((t) => t.status === 'queued').length,
       running: all.filter((t) => t.status === 'running').length,
+      blocked: all.filter((t) => t.status === 'blocked').length,
       completed: all.filter((t) => t.status === 'completed').length,
       failed: all.filter((t) => t.status === 'failed').length,
     };
@@ -251,6 +323,7 @@ class AgentTaskRegistry {
     }
 
     if (task.status === 'queued') {
+      this.executionQueue = this.executionQueue.filter((execution) => execution.taskId !== id);
       task.status = 'failed';
       task.error = 'Zadanie wycofane z kolejki.';
       task.completedAt = new Date().toISOString();
@@ -295,10 +368,32 @@ class AgentTaskRegistry {
     this.tasks.set(taskId, task);
     this.saveToDisk();
 
-    // Start execution asynchronously
-    void this.executeTask(taskId, params.actionType, params.payload, params.aiExecutor);
+    this.executionQueue.push({
+      taskId,
+      actionType: params.actionType,
+      payload: params.payload,
+      aiExecutor: params.aiExecutor,
+    });
+    this.scheduleQueuedTasks();
 
     return task;
+  }
+
+  private scheduleQueuedTasks(): void {
+    while (this.activeExecutionCount < MAX_CONCURRENT_TASKS && this.executionQueue.length > 0) {
+      const execution = this.executionQueue.shift();
+      if (!execution) return;
+      this.activeExecutionCount += 1;
+      void this.executeTask(
+        execution.taskId,
+        execution.actionType,
+        execution.payload,
+        execution.aiExecutor,
+      ).finally(() => {
+        this.activeExecutionCount -= 1;
+        this.scheduleQueuedTasks();
+      });
+    }
   }
 
   private async executeTask(
@@ -394,15 +489,12 @@ class AgentTaskRegistry {
         task.result = `Raport integralności wygenerowany pomyślnie (${task.artifact.sizeBytes} B).`;
       } else if (actionType === 'scaffold_app') {
         const appId = payload.targetAppId || 'bastilla_os_2';
-        appendLog(`Weryfikacja/tworzenie struktury aplikacji apps/${appId}...`);
         await new Promise((r) => setTimeout(r, 400));
 
-        const appDir = path.resolve('apps', appId);
-        if (!fs.existsSync(appDir)) {
-          fs.mkdirSync(appDir, { recursive: true });
-        }
+        const appDir = resolveAppDirectory(appId);
+        appendLog(`Weryfikacja/tworzenie struktury aplikacji apps/${appId}...`);
 
-        const manifestPath = path.join(appDir, 'app.json');
+        const manifestPath = resolveAppFile(appDir, 'app.json');
         if (!fs.existsSync(manifestPath)) {
           const manifest = {
             id: appId,
@@ -431,18 +523,14 @@ class AgentTaskRegistry {
         const filename = payload.filename || 'config.json';
         const content = payload.content || JSON.stringify({ updated: true, agent: task.agent, timestamp: new Date().toISOString() }, null, 2);
 
+        const appDir = resolveAppDirectory(appId);
+        const filePath = resolveAppFile(appDir, filename);
         appendLog(`Zapisywanie pliku ${filename} do apps/${appId}...`);
-        const appDir = path.resolve('apps', appId);
-        if (!fs.existsSync(appDir)) {
-          fs.mkdirSync(appDir, { recursive: true });
-          appendLog(`Utworzono brakujący katalog aplikacji apps/${appId}.`);
-        }
 
-        const filePath = path.join(appDir, filename);
         fs.writeFileSync(filePath, content, 'utf-8');
         appendLog(`Zapisano plik apps/${appId}/${filename}.`);
 
-        const mPath = path.join(appDir, 'app.json');
+        const mPath = resolveAppFile(appDir, 'app.json');
         if (fs.existsSync(mPath)) {
           try {
             const m = JSON.parse(fs.readFileSync(mPath, 'utf-8'));
@@ -510,7 +598,7 @@ class AgentTaskRegistry {
       task.completedAt = new Date().toISOString();
       appendLog(`Zadanie zakończone sukcesem. Artefakt potwierdzony: ${task.artifact.path}`);
     } catch (err: any) {
-      task.status = 'failed';
+      task.status = actionType === 'ai_task' && !aiExecutor ? 'blocked' : 'failed';
       task.error = err?.message || String(err);
       task.completedAt = new Date().toISOString();
       appendLog(`BŁĄD: ${task.error}`);

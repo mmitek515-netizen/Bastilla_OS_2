@@ -26,7 +26,7 @@ interface AgentTask {
   agent: 'Alex' | 'Astyria' | 'Aurelius' | 'Aria' | 'Operator';
   title: string;
   description: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'blocked' | 'completed' | 'failed';
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -40,14 +40,15 @@ interface TaskStats {
   total: number;
   queued: number;
   running: number;
+  blocked: number;
   completed: number;
   failed: number;
 }
 
 export const BastillaOS2View: React.FC = () => {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [stats, setStats] = useState<TaskStats>({ total: 0, queued: 0, running: 0, completed: 0, failed: 0 });
-  const [filter, setFilter] = useState<'all' | 'running' | 'completed' | 'failed'>('all');
+  const [stats, setStats] = useState<TaskStats>({ total: 0, queued: 0, running: 0, blocked: 0, completed: 0, failed: 0 });
+  const [filter, setFilter] = useState<'all' | 'running' | 'blocked' | 'completed' | 'failed'>('all');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [runningAction, setRunningAction] = useState(false);
@@ -273,12 +274,12 @@ export const BastillaOS2View: React.FC = () => {
                 <span>Rzeczywisty Rejestr Zadań Agentów (Agent Task Registry)</span>
               </h2>
               <p className="text-xs text-[#736758] mt-0.5">
-                Stany: queued / running / completed / failed. Znaczniki czasu, logi i fizyczne artefakty.
+                Stany: queued / running / blocked / completed / failed. Znaczniki czasu, logi i fizyczne artefakty.
               </p>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-[#FAF7F0] p-1 rounded-lg border border-[#E6DCB8] text-xs">
-              {(['all', 'running', 'completed', 'failed'] as const).map((mode) => (
+            <div className="flex flex-wrap items-center gap-1.5 bg-[#FAF7F0] p-1 rounded-lg border border-[#E6DCB8] text-xs">
+              {(['all', 'running', 'blocked', 'completed', 'failed'] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setFilter(mode)}
@@ -290,6 +291,7 @@ export const BastillaOS2View: React.FC = () => {
                 >
                   {mode === 'all' && `Wszystkie (${tasks.length})`}
                   {mode === 'running' && `W toku (${stats.running})`}
+                  {mode === 'blocked' && `Zablokowane (${stats.blocked})`}
                   {mode === 'completed' && `Ukończone (${stats.completed})`}
                   {mode === 'failed' && `Błędy (${stats.failed})`}
                 </button>
@@ -309,6 +311,7 @@ export const BastillaOS2View: React.FC = () => {
                 const statusStyles = {
                   completed: 'bg-emerald-50 text-emerald-800 border-emerald-200',
                   running: 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse',
+                  blocked: 'bg-orange-50 text-orange-800 border-orange-200',
                   queued: 'bg-blue-50 text-blue-800 border-blue-200',
                   failed: 'bg-red-50 text-red-800 border-red-200',
                 }[task.status];
