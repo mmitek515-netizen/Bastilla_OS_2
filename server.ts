@@ -2684,11 +2684,11 @@ function pushSystemLog(
 // Public activity feed exposes only vetted event categories and minimal metadata.
 // Never forward raw log messages: they may contain commands, paths or credentials.
 app.get('/api/agents/activity', (_req, res) => {
-  const allowed = /\\[(?:GITHUB AUTO|GIT AUTO|GIT|GITHUB|CHAT EXEC|DEPLOY|STUDIO APLIKACJI)\\]/;
+  const allowed = /\[(?:GITHUB AUTO|GIT AUTO|GIT|GITHUB|CHAT EXEC|DEPLOY|STUDIO APLIKACJI)\]/;
   const events = systemLogs.filter(entry => allowed.test(entry.message)).slice(-40).map(entry => {
-    const match = entry.message.match(/\\[(GITHUB AUTO|GIT AUTO|GIT|GITHUB|CHAT EXEC|DEPLOY|STUDIO APLIKACJI)\\]/);
+    const match = entry.message.match(/\[(GITHUB AUTO|GIT AUTO|GIT|GITHUB|CHAT EXEC|DEPLOY|STUDIO APLIKACJI)\]/);
     const category = match?.[1] || 'SYSTEM';
-    const commit = entry.message.match(/\\b[0-9a-f]{7,40}\\b/i)?.[0];
+    const commit = entry.message.match(/\b[0-9a-f]{7,40}\b/i)?.[0];
     return {
       id: entry.id,
       timestamp: entry.timestamp,
