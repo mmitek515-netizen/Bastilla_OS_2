@@ -6378,7 +6378,11 @@ app.all(['/api/mcp', '/mcp'], async (req, res) => {
         });
       case 'tools/call': {
         const toolName = params?.name;
-        const toolArguments = params?.arguments || {};
+        const toolArguments = params?.arguments ?? {};
+        if (typeof toolName !== 'string' || !MCP_TOOLS.some((tool) => tool.name === toolName)
+          || typeof toolArguments !== 'object' || toolArguments === null || Array.isArray(toolArguments)) {
+          return res.status(400).json({ jsonrpc: '2.0', id, error: { code: -32602, message: 'Invalid MCP tool name or arguments' } });
+        }
         const callResult = await handleMcpToolCall(toolName, toolArguments);
         return res.json({
           jsonrpc: '2.0',
@@ -6401,7 +6405,7 @@ app.all(['/api/mcp', '/mcp'], async (req, res) => {
     return res.status(500).json({
       jsonrpc: '2.0',
       id: id ?? null,
-      error: { code: -32603, message: `Internal error: ${error?.message || error}` },
+      error: { code: -32603, message: 'Internal MCP error' },
     });
   }
 });
