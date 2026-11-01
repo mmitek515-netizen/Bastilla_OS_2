@@ -6352,12 +6352,38 @@ app.post('/api/agent-tasks/run', async (req, res) => {
     if (!agent || !title || !description) {
       return res.status(400).json({ success: false, error: 'Wymagane pola: agent, title, description.' });
     }
+    const taskAgents = ['Alex', 'Astyria', 'Aurelius', 'Aria'];
+    if (!taskAgents.includes(agent)) {
+      return res.status(400).json({ success: false, error: 'Nieznany agent.' });
+    }
+    if (typeof title !== 'string' || typeof description !== 'string' || !title.trim() || !description.trim()
+      || title.length > 200 || description.length > 8000) {
+      return res.status(400).json({ success: false, error: 'Tytuł lub opis zadania ma nieprawidłowy format albo długość.' });
+    }
+    const requestedAction = String(actionType || executionType || 'ai_task');
+    const taskActions = ['ai_task', 'audit_system_integrity', 'scaffold_app', 'write_app_file', 'generic_diag'];
+    if (!taskActions.includes(requestedAction)) {
+      return res.status(400).json({ success: false, error: 'Nieobsługiwany typ akcji.' });
+    }
     const task = await agentTaskRegistry.runTask({
       agent,
-      title,
-      description,
-      actionType: String(actionType || executionType || 'scaffold_app'),
+      title: title.trim(),
+      description: description.trim(),
+      actionType: requestedAction,
       payload: { targetAppId: targetAppId || 'bastilla_os_2' },
+      ...(requestedAction === 'ai_task' ? {
+        aiExecutor: async (task, signal) => {
+          const chatAgent: ChatAgentName = task.agent === 'Aria' ? 'si_1'
+            : task.agent === 'Operator' ? 'Alex' : task.agent;
+          const result = await generateWithChain(LLM_CHAIN_CONFIG, {
+            system: `${CHAT_AGENT_MISSIONS[chatAgent]} Odpowiadasz na jawne zadanie przekazane przez operatora. Nie masz narzędzi do wykonywania poleceń ani zapisu plików. Przygotuj konkretną analizę lub rezultat, ale nie deklaruj zmian ani działań, których serwer nie wykonał.`,
+            history: [],
+            message: `Tytuł: ${task.title}\n\nOpis zadania: ${task.description}`,
+            maxOutputTokens: 2048,
+          }, signal);
+          return { text: result.text, provider: result.provider, model: result.model };
+        },
+      } : {}),
     });
     return res.json({ success: true, task });
   } catch (err: any) {

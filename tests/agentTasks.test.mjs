@@ -81,3 +81,51 @@ test('AgentTaskRegistry: write_app_file creates app directory and manifest autom
   // Clean up test app
   fs.rmSync(path.resolve('apps', testAppId), { recursive: true, force: true });
 });
+
+test('AgentTaskRegistry: ai_task calls the supplied model executor and saves its response', async () => {
+  const task = await agentTaskRegistry.runTask({
+    agent: 'Aria',
+    title: 'Raport testowy AI',
+    description: 'Przygotuj krótki raport.',
+    actionType: 'ai_task',
+    aiExecutor: async (input, signal) => {
+      assert.equal(input.agent, 'Aria');
+      assert.equal(input.title, 'Raport testowy AI');
+      assert.ok(signal instanceof AbortSignal);
+      return { text: 'Wynik wygenerowany przez model.', provider: 'test-provider', model: 'test-model' };
+    },
+  });
+
+  let finished;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finished = agentTaskRegistry.getById(task.id);
+    if (finished?.status === 'completed' || finished?.status === 'failed') break;
+  }
+
+  assert.equal(finished?.status, 'completed');
+  assert.match(finished.result, /Wynik wygenerowany przez model/);
+  assert.ok(fs.existsSync(path.resolve(finished.artifact.path)));
+  assert.match(fs.readFileSync(path.resolve(finished.artifact.path), 'utf8'), /test-provider \(test-model\)/);
+  fs.rmSync(path.resolve(finished.artifact.path), { force: true });
+});
+
+test('AgentTaskRegistry: unsupported action fails instead of producing a fake diagnostic', async () => {
+  const task = await agentTaskRegistry.runTask({
+    agent: 'Alex',
+    title: 'Nieznana akcja',
+    description: 'Nie może udawać sukcesu.',
+    actionType: 'unsupported_action',
+  });
+
+  let finished;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finished = agentTaskRegistry.getById(task.id);
+    if (finished?.status === 'completed' || finished?.status === 'failed') break;
+  }
+
+  assert.equal(finished?.status, 'failed');
+  assert.match(finished.error, /Nieobsługiwany typ akcji/);
+  assert.equal(finished.artifact, undefined);
+});

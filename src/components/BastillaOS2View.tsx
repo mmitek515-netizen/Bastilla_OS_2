@@ -55,10 +55,11 @@ export const BastillaOS2View: React.FC = () => {
 
   // Form state
   const [agent, setAgent] = useState<'Alex' | 'Astyria' | 'Aurelius' | 'Aria'>('Astyria');
-  const [actionType, setActionType] = useState('audit_system_integrity');
-  const [taskTitle, setTaskTitle] = useState('Audyt integralności jądra i katalogów');
-  const [taskDescription, setTaskDescription] = useState('Weryfikacja fizycznych ścieżek na dysku, struktur aplikacji i rejestru zadań.');
+  const [actionType, setActionType] = useState('ai_task');
+  const [taskTitle, setTaskTitle] = useState('Analiza zadania przez agenta AI');
+  const [taskDescription, setTaskDescription] = useState('Opisz konkretnie, co agent ma przeanalizować lub przygotować.');
   const [targetAppId, setTargetAppId] = useState('bastilla_os_2');
+  const [runError, setRunError] = useState('');
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -86,6 +87,7 @@ export const BastillaOS2View: React.FC = () => {
   const handleRunTask = async (e: React.FormEvent) => {
     e.preventDefault();
     setRunningAction(true);
+    setRunError('');
     try {
       const res = await fetch('/api/agent-tasks/run', {
         method: 'POST',
@@ -98,12 +100,16 @@ export const BastillaOS2View: React.FC = () => {
           targetAppId,
         }),
       });
-      if (res.ok) {
-        setIsModalOpen(false);
-        await fetchTasks();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setRunError(data.error || `Nie udało się uruchomić zadania (HTTP ${res.status}).`);
+        return;
       }
+      setIsModalOpen(false);
+      await fetchTasks();
     } catch (err) {
       console.error('Błąd uruchamiania zadania:', err);
+      setRunError('Nie można połączyć się z serwerem zadań.');
     } finally {
       setRunningAction(false);
     }
@@ -156,7 +162,7 @@ export const BastillaOS2View: React.FC = () => {
 
           <div className="flex items-center gap-2.5">
             <button
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => { setRunError(''); setIsModalOpen(true); }}
               className="px-3.5 py-2 rounded-lg bg-gradient-to-r from-[#DFB96C] via-[#C5A059] to-[#997A3D] text-white text-xs font-semibold hover:brightness-105 active:scale-95 transition shadow-xs flex items-center gap-1.5"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
@@ -418,7 +424,7 @@ export const BastillaOS2View: React.FC = () => {
                 <div className="w-7 h-7 rounded-md bg-gradient-to-br from-[#DFB96C] to-[#C5A059] flex items-center justify-center text-white">
                   <Play className="w-4 h-4 fill-current" />
                 </div>
-                <h3 className="text-sm font-bold text-[#1A1612]">Nowe Zadanie Agenta Triady</h3>
+                <h3 className="text-sm font-bold text-[#1A1612]">Nowe zadanie agenta AI</h3>
               </div>
               <button onClick={() => setIsModalOpen(false)} className="text-[#8C7E6D] hover:text-[#1A1612]">
                 ✕
@@ -441,17 +447,21 @@ export const BastillaOS2View: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-medium text-[#594E3F] mb-1">Typ Akcji (z artefaktem na dysku)</label>
+                <label className="block font-medium text-[#594E3F] mb-1">Tryb wykonania</label>
                 <select
                   value={actionType}
                   onChange={(e) => setActionType(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612] focus:outline-none focus:border-[#C5A059]"
                 >
+                  <option value="ai_task">Zadanie AI (wymaga dostępnego modelu; zapisuje odpowiedź jako raport)</option>
                   <option value="audit_system_integrity">Audyt integralności jądra (tworzy exports/system_integrity_report.json)</option>
                   <option value="scaffold_app">Inicjalizacja/audyt aplikacji w apps/ (tworzy app.json)</option>
                   <option value="write_app_file">Zapis bezpiecznego pliku w apps/ (tworzy katalog i manifest)</option>
                   <option value="generic_diag">Diagnostyka systemowa (tworzy raport diagnostyczny w exports/)</option>
                 </select>
+                {actionType === 'ai_task' && (
+                  <p className="mt-1 text-[11px] text-[#736758]">Model przygotuje odpowiedź; nie uruchamia poleceń ani nie zmienia plików projektu.</p>
+                )}
               </div>
 
               {(actionType === 'scaffold_app' || actionType === 'write_app_file') && (
@@ -487,6 +497,12 @@ export const BastillaOS2View: React.FC = () => {
                   className="w-full px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612]"
                 />
               </div>
+
+              {runError && (
+                <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+                  {runError}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#F0EAE1]">
                 <button

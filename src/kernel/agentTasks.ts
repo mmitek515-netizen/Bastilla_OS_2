@@ -274,6 +274,10 @@ class AgentTaskRegistry {
     description: string;
     actionType: string;
     payload?: Record<string, any>;
+    aiExecutor?: (
+      task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
+      signal: AbortSignal,
+    ) => Promise<{ text: string; provider: string; model: string }>;
   }): Promise<AgentTask> {
     const taskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
@@ -292,7 +296,7 @@ class AgentTaskRegistry {
     this.saveToDisk();
 
     // Start execution asynchronously
-    void this.executeTask(taskId, params.actionType, params.payload);
+    void this.executeTask(taskId, params.actionType, params.payload, params.aiExecutor);
 
     return task;
   }
@@ -300,7 +304,11 @@ class AgentTaskRegistry {
   private async executeTask(
     taskId: string,
     actionType: string,
-    payload: Record<string, any> = {}
+    payload: Record<string, any> = {},
+    aiExecutor?: (
+      task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
+      signal: AbortSignal,
+    ) => Promise<{ text: string; provider: string; model: string }>,
   ): Promise<void> {
     const task = this.tasks.get(taskId);
     if (!task) return;
@@ -323,7 +331,37 @@ class AgentTaskRegistry {
         throw new Error('Przerwano przed rozpoczęciem.');
       }
 
-      if (actionType === 'audit_system_integrity') {
+      if (actionType === 'ai_task') {
+        if (!aiExecutor) {
+          throw new Error('Brak wykonawcy modelu AI dla tego zadania.');
+        }
+        appendLog('Wysyłanie zadania do skonfigurowanego modelu AI...');
+        const response = await aiExecutor(task, controller.signal);
+        if (!response.text.trim()) {
+          throw new Error('Model AI zwrócił pustą odpowiedź.');
+        }
+
+        const reportsDir = path.resolve('exports', 'agent_tasks');
+        fs.mkdirSync(reportsDir, { recursive: true });
+        const reportPath = path.join(reportsDir, `${taskId}.md`);
+        fs.writeFileSync(reportPath, [
+          `# ${task.title}`,
+          '',
+          `Agent: ${task.agent}`,
+          `Provider: ${response.provider} (${response.model})`,
+          '',
+          response.text,
+          '',
+        ].join('\n'), 'utf-8');
+
+        task.artifact = {
+          path: path.relative(path.resolve('.'), reportPath),
+          name: path.basename(reportPath),
+          sizeBytes: fs.statSync(reportPath).size,
+        };
+        task.result = response.text;
+        appendLog(`Model ${response.provider} (${response.model}) przygotował odpowiedź.`);
+      } else if (actionType === 'audit_system_integrity') {
         appendLog('Skanowanie spójności plików jądra i konfiguracji...');
         await new Promise((r) => setTimeout(r, 600));
 
@@ -436,7 +474,7 @@ class AgentTaskRegistry {
           sizeBytes: fs.statSync(filePath).size,
         };
         task.result = `Plik ${filename} w aplikacji ${appId} zapisany (${task.artifact.sizeBytes} B).`;
-      } else {
+      } else if (actionType === 'generic_diag') {
         const exportsDir = path.resolve('exports');
         if (!fs.existsSync(exportsDir)) {
           fs.mkdirSync(exportsDir, { recursive: true });
@@ -459,6 +497,8 @@ class AgentTaskRegistry {
           sizeBytes: fs.statSync(diagPath).size,
         };
         task.result = `Operacja zakończona pomyślnie.`;
+      } else {
+        throw new Error(`Nieobsługiwany typ akcji: ${actionType}`);
       }
 
       // STRICT VALIDATION: completed requires artifact on disk
