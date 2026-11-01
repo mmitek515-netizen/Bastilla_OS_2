@@ -11,36 +11,6 @@ export const MCP_TOOLS = [
   },
 ];
 
-export function createMcpRateLimiter({
-  limit = 60,
-  windowMs = 60_000,
-  maxClients = 4096,
-  now = Date.now,
-} = {}) {
-  const clients = new Map();
-  return (clientKey) => {
-    const currentTime = now();
-    let client = clients.get(clientKey);
-    if (!client || currentTime >= client.resetAt) {
-      if (!client && clients.size >= maxClients) {
-        for (const [key, entry] of clients) {
-          if (currentTime >= entry.resetAt) clients.delete(key);
-        }
-        if (clients.size >= maxClients) {
-          return { allowed: false, retryAfterSeconds: Math.ceil(windowMs / 1000) };
-        }
-      }
-      client = { count: 0, resetAt: currentTime + windowMs };
-      clients.set(clientKey, client);
-    }
-    if (client.count >= limit) {
-      return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((client.resetAt - currentTime) / 1000)) };
-    }
-    client.count++;
-    return { allowed: true, retryAfterSeconds: 0 };
-  };
-}
-
 export function mcpTokenConfigured(env = process.env) {
   return (env.BASTILLA_MCP_TOKEN || '').trim().length >= 32;
 }

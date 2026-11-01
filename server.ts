@@ -1,6 +1,7 @@
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { registerGptActions } from './src/lib/gptActions.mjs';
-import { authorizeMcpRequest, buildMcpDiagnostics, createMcpRateLimiter, MCP_TOOLS } from './src/lib/mcpDiagnostics.mjs';
+import { authorizeMcpRequest, buildMcpDiagnostics, MCP_TOOLS } from './src/lib/mcpDiagnostics.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
@@ -6002,19 +6003,22 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
 }
 
 // MCP SSE endpoint
-const mcpSseRateLimit = createMcpRateLimiter({ limit: 10 });
-const mcpJsonRpcRateLimit = createMcpRateLimiter();
-const enforceMcpRateLimit = (req: express.Request, res: express.Response, limiter: (key: string) => { allowed: boolean; retryAfterSeconds: number }) => {
-  const result = limiter(req.ip || req.socket.remoteAddress || 'unknown');
-  if (result.allowed) return false;
-  res.setHeader('Retry-After', String(result.retryAfterSeconds));
-  res.setHeader('Cache-Control', 'no-store');
-  res.status(429).json({ error: 'Too many MCP requests. Retry later.' });
-  return true;
-};
+const mcpSseRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many MCP requests. Retry later.' },
+});
+const mcpJsonRpcRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many MCP requests. Retry later.' },
+});
 
-app.get('/api/mcp/sse', (req, res) => {
-  if (enforceMcpRateLimit(req, res, mcpSseRateLimit)) return;
+app.get('/api/mcp/sse', mcpSseRateLimit, (req, res) => {
   const mcpToken = process.env.BASTILLA_MCP_TOKEN || '';
   if (mcpToken.trim().length < 32) {
     return res.status(503).json({ error: 'MCP is disabled until BASTILLA_MCP_TOKEN is configured.' });
@@ -6102,8 +6106,7 @@ app.get('/api/mcp/setup', async (_req, res) => {
 });
 
 // Legacy authenticated JSON-RPC status endpoint; Streamable HTTP lives in integrations/mcp.
-app.all(['/api/mcp', '/mcp'], async (req, res) => {
-  if (enforceMcpRateLimit(req, res, mcpJsonRpcRateLimit)) return;
+app.all(['/api/mcp', '/mcp'], mcpJsonRpcRateLimit, async (req, res) => {
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }

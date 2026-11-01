@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import express from 'express';
 import test from 'node:test';
+import { rateLimit } from 'express-rate-limit';
 import {
   authorizeMcpRequest,
   buildMcpDiagnostics,
   configuredMcpPublicUrl,
-  createMcpRateLimiter,
   MCP_TOOLS,
   mcpTokenConfigured,
 } from '../src/lib/mcpDiagnostics.mjs';
@@ -27,16 +28,25 @@ test('legacy MCP endpoint exposes only a read-only status tool', () => {
   assert.equal(MCP_TOOLS[0].inputSchema.properties.command, undefined);
 });
 
-test('legacy MCP request limits enforce window resets and bounded client state', () => {
-  let time = 0;
-  const limiter = createMcpRateLimiter({ limit: 2, windowMs: 1000, maxClients: 2, now: () => time });
-  assert.equal(limiter('client-a').allowed, true);
-  assert.equal(limiter('client-a').allowed, true);
-  assert.deepEqual(limiter('client-a'), { allowed: false, retryAfterSeconds: 1 });
-  assert.equal(limiter('client-b').allowed, true);
-  assert.deepEqual(limiter('client-c'), { allowed: false, retryAfterSeconds: 1 });
-  time = 1000;
-  assert.equal(limiter('client-c').allowed, true);
+test('Express rate-limit middleware rejects requests above the configured window', async (t) => {
+  const app = express();
+  app.get('/mcp', rateLimit({
+    windowMs: 60_000,
+    limit: 2,
+    standardHeaders: false,
+    legacyHeaders: false,
+  }), (_req, res) => res.send('ok'));
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const results = await Promise.all([
+    fetch(`http://127.0.0.1:${port}/mcp`),
+    fetch(`http://127.0.0.1:${port}/mcp`),
+    fetch(`http://127.0.0.1:${port}/mcp`),
+  ]);
+  assert.deepEqual(results.map((response) => response.status).sort((a, b) => a - b), [200, 200, 429]);
 });
 
 test('only a public HTTPS MCP URL can be reported as configured', () => {
