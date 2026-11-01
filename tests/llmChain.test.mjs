@@ -62,6 +62,36 @@ test('Gemini odpowiada jako pierwszy, z historią i instrukcją systemową', asy
   assert.equal(calls[0].body.contents[2].parts[0].text, request.message);
 });
 
+test('Gemini vision receives the original image bytes and not filename-derived content', async () => {
+  const imageRequest = {
+    ...request,
+    message: 'Co widać na zdjęciach?',
+    attachments: [
+      { name: 'pierwsze.png', mimeType: 'image/png', content: 'iVBORw0KGgoAAAANSUhEUg==' },
+      { name: 'drugie.webp', mimeType: 'image/webp', content: 'UklGRgAAAABXRUJQ' },
+      { name: 'trzecie.jpg', mimeType: 'image/jpeg', content: '/9j/4AAQSkZJRg==' },
+    ],
+  };
+  const { impl, calls } = mockFetch([
+    [/generativelanguage.*gemini-a:generateContent/, { respond: () => geminiOk('Na zdjęciach są różne obiekty.') }],
+  ]);
+  const result = await generateWithChain({
+    providers: ['gemini'],
+    geminiApiKey: 'test-key',
+    geminiModel: 'gemini-a',
+    fetchImpl: impl,
+  }, imageRequest);
+
+  assert.equal(result.provider, 'gemini');
+  const parts = calls[0].body.contents.at(-1).parts;
+  assert.equal(parts[0].text, imageRequest.message);
+  assert.deepEqual(parts.slice(1), imageRequest.attachments.map(({ mimeType, content }) => ({
+    inlineData: { mimeType, data: content },
+  })));
+  assert.equal(JSON.stringify(calls[0].body).includes('pierwsze.png'), false);
+  assert.equal(calls.length, 1, 'Gemini-only configuration does not contact Ollama or another provider.');
+});
+
 test('limit Gemini (429) przełącza na model zapasowy Gemini', async () => {
   const { impl } = mockFetch([
     [/gemini-a:generateContent/, { respond: () => json(429, { error: 'quota' }) }],

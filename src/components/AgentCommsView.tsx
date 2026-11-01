@@ -17,6 +17,7 @@ import {
   CHAT_ATTACHMENT_ACCEPT,
   ChatAttachment,
   MAX_CHAT_ATTACHMENTS,
+  formatChatMessage,
   readChatAttachmentFile,
   validateChatAttachments,
 } from '../kernel/chatAttachments';
@@ -60,6 +61,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   const [selectedMissionAction, setSelectedMissionAction] = useState<AstyriaMissionAction>('deep_scan');
   const [messageText, setMessageText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
+  const [sentImagePreview, setSentImagePreview] = useState<{ message: string; images: ChatAttachment[] } | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [mobileSection, setMobileSection] = useState<'chat' | 'agents'>('chat');
   const [showProtocolTools, setShowProtocolTools] = useState(false);
@@ -70,6 +72,13 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     : isLoading
     ? { label: 'PRZETWARZANIE', color: 'cyan' }
     : { label: 'OCZEKUJE', color: 'slate' };
+  const sentImageMessageIndex = sentImagePreview
+    ? dataStore.chat_history.reduce((lastIndex, entry, index) =>
+        (entry.agent === OPERATOR_NAME || entry.agent === 'Operator') &&
+        entry.tekst === sentImagePreview.message
+          ? index
+          : lastIndex, -1)
+    : -1;
 
   useEffect(() => {
     const chatScroll = chatScrollRef.current;
@@ -117,6 +126,10 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     if ((!message && chatAttachments.length === 0) || isLoading) return;
     try {
       await onSendMessage(message, selectedTarget, chatAttachments);
+      const images = chatAttachments.filter((attachment) => attachment.mimeType?.startsWith('image/'));
+      setSentImagePreview(images.length > 0
+        ? { message: formatChatMessage(message, chatAttachments), images }
+        : null);
       setMessageText('');
       setChatAttachments([]);
       setAttachmentError(null);
@@ -230,7 +243,10 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               </button>
             )}
             <button
-              onClick={onClearHistory}
+              onClick={() => {
+                setSentImagePreview(null);
+                onClearHistory();
+              }}
               className="px-2 py-0.5 sm:px-2.5 sm:py-1 bg-rose-950/80 hover:bg-rose-900 border border-rose-600/60 text-rose-200 rounded-lg cursor-pointer transition font-bold text-[10px] flex items-center gap-1 shadow-[0_0_8px_rgba(244,63,94,0.3)]"
               title="Wyczyść historię i zresetuj pętlę rozmowy"
             >
@@ -356,6 +372,9 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             const agentKey = msg.agent === OPERATOR_NAME ? 'Operator' : msg.agent;
             const profile: AgentProfile | undefined = SYSTEM_AGENTS[agentKey] || SYSTEM_AGENTS[msg.agent];
             const isOperator = msg.agent === OPERATOR_NAME || msg.agent === 'Operator';
+            const sentImages = sentImagePreview && isOperator && idx === sentImageMessageIndex
+              ? sentImagePreview.images
+              : [];
 
             return (
               <div
@@ -391,6 +410,19 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
 
                 {/* Message Body with KaTeX LaTeX formulas and Markdown */}
                 <FormattedMessage content={msg.tekst} className="text-xs leading-relaxed text-slate-200" />
+
+                {sentImages.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2" aria-label="Wysłane zdjęcia">
+                    {sentImages.map((image, imageIndex) => (
+                      <img
+                        key={`${image.name}-${imageIndex}`}
+                        src={`data:${image.mimeType};base64,${image.content}`}
+                        alt={`Wysłane zdjęcie: ${image.name}`}
+                        className="max-h-48 max-w-full rounded-md border border-slate-700 bg-black/50 object-contain"
+                      />
+                    ))}
+                  </div>
+                )}
 
                 {/* Attached Image/File preview in chat history */}
                 {msg.file && (
@@ -448,9 +480,15 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
           {chatAttachments.length > 0 && (
             <ul aria-label="Załączone pliki" className="mb-2 flex flex-wrap gap-1.5">
               {chatAttachments.map((file, index) => (
-                <li key={`${file.name}-${index}`} className="flex items-center gap-1 rounded border border-cyan-500/30 bg-cyan-950/40 px-2 py-1 text-[10px] text-cyan-100">
-                  <FileText className="h-3 w-3" />
-                  <span>{file.name}</span>
+                <li key={`${file.name}-${index}`} className="flex max-w-full items-center gap-1 rounded border border-cyan-500/30 bg-cyan-950/40 px-2 py-1 text-[10px] text-cyan-100">
+                  {file.mimeType?.startsWith('image/') ? (
+                    <img
+                      src={`data:${file.mimeType};base64,${file.content}`}
+                      alt={`Podgląd zdjęcia: ${file.name}`}
+                      className="h-10 w-10 shrink-0 rounded border border-cyan-500/30 object-cover"
+                    />
+                  ) : <FileText className="h-3 w-3 shrink-0" />}
+                  <span className="break-all">{file.name}</span>
                   <button
                     type="button"
                     onClick={() => setChatAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index))}
@@ -487,7 +525,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               </button>
             )}
           </div>
-          <label className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-700 text-cyan-200 hover:border-cyan-400 ${isLoading || chatAttachments.length >= MAX_CHAT_ATTACHMENTS ? 'pointer-events-none opacity-40' : ''}`} title="Dołącz tekst, DOCX, PDF lub JPG (maks. 10 plików; tekst 5 MB/plik, DOCX 20 MB, PDF/JPG 20 MB/plik)">
+          <label className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-700 text-cyan-200 hover:border-cyan-400 ${isLoading || chatAttachments.length >= MAX_CHAT_ATTACHMENTS ? 'pointer-events-none opacity-40' : ''}`} title="Wybierz zdjęcie lub plik z galerii">
             <Paperclip className="h-4 w-4" />
             <input
               type="file"
@@ -497,6 +535,18 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               onChange={(event) => void handleAttachmentSelection(event)}
               className="sr-only"
               aria-label="Dołącz pliki tekstowe, DOCX, PDF lub JPG"
+            />
+          </label>
+          <label className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-700 text-cyan-200 hover:border-cyan-400 ${isLoading || chatAttachments.length >= MAX_CHAT_ATTACHMENTS ? 'pointer-events-none opacity-40' : ''}`} title="Zrób zdjęcie aparatem">
+            <ImageIcon className="h-4 w-4" />
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              disabled={isLoading || chatAttachments.length >= MAX_CHAT_ATTACHMENTS}
+              onChange={(event) => void handleAttachmentSelection(event)}
+              className="sr-only"
+              aria-label="Zrób zdjęcie aparatem"
             />
           </label>
           <button
@@ -599,4 +649,3 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     </div>
   );
 };
-
