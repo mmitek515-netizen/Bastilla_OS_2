@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 
 export interface AgentTaskArtifact {
   path: string;
@@ -12,191 +13,132 @@ export interface AgentTask {
   agent: 'Alex' | 'Astyria' | 'Aurelius' | 'Aria' | 'Operator';
   title: string;
   description: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked';
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+  scheduledAt?: string;
+  retryAt?: string;
+  dependsOn: string[];
+  attempts: number;
+  maxAttempts: number;
+  timeoutMs: number;
+  requiresApproval: boolean;
+  approvedAt?: string;
+  blockedReason?: string;
   logs: string[];
   result?: string;
   artifact?: AgentTaskArtifact;
   error?: string;
 }
 
+type TaskJob = {
+  actionType: string;
+  payload: Record<string, unknown>;
+  aiExecutor?: (
+    task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
+    signal: AbortSignal,
+  ) => Promise<{ text: string; provider: string; model: string }>;
+};
+
+type TaskNotification = {
+  id: string;
+  taskId: string;
+  event: string;
+  status: AgentTask['status'];
+  timestamp: string;
+};
+
 const TASKS_STORAGE_PATH = path.resolve('data', 'agent_tasks.json');
+const TASK_AUDIT_PATH = path.resolve('data', 'agent_task_audit.jsonl');
+const MAX_ATTEMPTS = 3;
+const DEFAULT_TIMEOUT_MS = 60_000;
+const MAX_TIMEOUT_MS = 10 * 60_000;
+const SAFE_APP_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/;
+const SAFE_FILENAME = /^(?!app\.json$)[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/i;
+const EDITABLE_EXTENSIONS = new Set(['.html', '.css', '.js', '.mjs', '.cjs', '.json', '.md', '.txt', '.py']);
 
 function ensureDataDir(): void {
-  const dir = path.dirname(TASKS_STORAGE_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  fs.mkdirSync(path.dirname(TASKS_STORAGE_PATH), { recursive: true });
 }
 
-/**
- * Strict artifact verification:
- * 'completed' requires the artifact file to physically exist on disk.
- * If missing, the status is demoted to 'failed'.
- * Self-healing: if an artifact file was temporarily missing and now exists, it is validated.
- */
 function verifyTaskArtifact(task: AgentTask): AgentTask {
-  if (task.status === 'completed' || (task.status === 'failed' && task.error?.startsWith('Brak pliku artefaktu na dysku:'))) {
-    if (!task.artifact || !task.artifact.path) {
-      return {
-        ...task,
-        status: 'failed',
-        error: 'Stan ukończony wymaga powiązanego pliku artefaktu.',
-      };
-    }
+  if (task.status !== 'completed') return task;
+  if (!task.artifact?.path) {
+    task.status = 'failed';
+    task.error = 'Stan ukończony wymaga powiązanego pliku artefaktu.';
+    task.completedAt = new Date().toISOString();
+    return task;
+  }
+  try {
     const fullPath = path.resolve(task.artifact.path);
-    if (!fs.existsSync(fullPath)) {
-      return {
-        ...task,
-        status: 'failed',
-        error: `Brak pliku artefaktu na dysku: ${task.artifact.path}`,
-      };
-    }
-    try {
-      const stats = fs.statSync(fullPath);
-      task.artifact.sizeBytes = stats.size;
-      if (task.status === 'failed') {
-        task.status = 'completed';
-        delete task.error;
-      }
-    } catch {
-      return {
-        ...task,
-        status: 'failed',
-        error: `Błąd odczytu parametrów pliku: ${task.artifact.path}`,
-      };
-    }
+    const stats = fs.statSync(fullPath);
+    if (!stats.isFile()) throw new Error('Artifact is not a file');
+    task.artifact.sizeBytes = stats.size;
+  } catch {
+    task.status = 'failed';
+    task.error = `Brak pliku artefaktu na dysku: ${task.artifact.path}`;
+    task.completedAt = new Date().toISOString();
   }
   return task;
 }
 
-function seedDefaultTasks(): AgentTask[] {
-  const now = new Date().toISOString();
-  const tasks: AgentTask[] = [
-    {
-      id: 'task-bastilla-os-2-scaffold',
-      agent: 'Astyria',
-      title: 'Budowa prototypu Bastilla_OS_2 (Ivory & Gold)',
-      description: 'Utworzenie aplikacji Bastilla_OS_2 w apps/bastilla_os_2 z responsywnym pulpitem w estetyce Bastili Shan.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Inicjalizacja katalogu apps/bastilla_os_2.`,
-        `[${now}] Generowanie manifestu app.json i stylów kości słoniowej i złota.`,
-        `[${now}] Zapis pliku wejściowego index.html.`,
-        `[${now}] Zweryfikowano fizyczny plik na dysku: apps/bastilla_os_2/index.html.`,
-      ],
-      result: 'Prototyp Bastilla_OS_2 utworzony pomyślnie. Gotowy do uruchomienia i inspekcji.',
-      artifact: {
-        path: 'apps/bastilla_os_2/index.html',
-        name: 'index.html',
-        sizeBytes: 0,
-      },
-    },
-    {
-      id: 'task-system-snapshot-vm',
-      agent: 'Alex',
-      title: 'Weryfikacja migawki jądra VM_Ten_System',
-      description: 'Zapis i weryfikacja spójnego snapshotu JSON stanu jądra w katalogu exports.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Odczyt stanu jądra Python i telemetrycznych metryk pamięci RAM.`,
-        `[${now}] Zapis danych do pliku exports/vm_ten_system_snapshot.json.`,
-        `[${now}] Weryfikacja integralności schematu JSON snapshotu.`,
-      ],
-      result: 'Snapshot maszyny VM_Ten_System zaktualizowany i gotowy do inspekcji.',
-      artifact: {
-        path: 'exports/vm_ten_system_snapshot.json',
-        name: 'vm_ten_system_snapshot.json',
-        sizeBytes: 0,
-      },
-    },
-    {
-      id: 'task-sqlite-integrity-audit',
-      agent: 'Aurelius',
-      title: 'Audyt fizycznej bazy danych SQLite',
-      description: 'Weryfikacja integralności magazynu danych w data/databases/core_data.sqlite.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Skanowanie katalogu data/databases.`,
-        `[${now}] Weryfikacja istnienia bazy core_data.sqlite.`,
-        `[${now}] Potwierdzono obecność pliku bazy danych na dysku.`,
-      ],
-      result: 'Baza SQLite zweryfikowana. Plik istnieje w systemie plików.',
-      artifact: {
-        path: 'data/databases/core_data.sqlite',
-        name: 'core_data.sqlite',
-        sizeBytes: 0,
-      },
-    },
-    {
-      id: 'task-ollama-runtime-check',
-      agent: 'Aria',
-      title: 'Diagnostyka wykonawcza Ollama',
-      description: 'Weryfikacja dostępności demona Ollama pod adresem http://127.0.0.1:11434 i skryptu setup.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Odpytanie punktu końcowego Ollama API.`,
-        `[${now}] Zweryfikowano obecność instalatora w scripts/setup-ollama.sh.`,
-        `[${now}] Status połączenia zarejestrowany w pamięci serwera.`,
-      ],
-      result: 'Diagnostyka wykonana. Skrypt konfiguracyjny istnieje na dysku.',
-      artifact: {
-        path: 'scripts/setup-ollama.sh',
-        name: 'setup-ollama.sh',
-        sizeBytes: 0,
-      },
-    },
-  ];
-
-  return tasks.map(verifyTaskArtifact);
-}
-
 class AgentTaskRegistry {
-  private tasks: Map<string, AgentTask> = new Map();
-  private runningExecutors: Map<string, AbortController> = new Map();
+  private tasks = new Map<string, AgentTask>();
+  private jobs = new Map<string, TaskJob>();
+  private runningExecutors = new Map<string, AbortController>();
+  private notifications: TaskNotification[] = [];
+  private processing = false;
 
   constructor() {
     this.loadFromDisk();
+    const scheduler = setInterval(() => void this.processQueue(), 250);
+    scheduler.unref();
   }
 
   private loadFromDisk(): void {
     ensureDataDir();
     if (fs.existsSync(TASKS_STORAGE_PATH)) {
       try {
-        const raw = fs.readFileSync(TASKS_STORAGE_PATH, 'utf-8');
-        const list = JSON.parse(raw);
+        const list: unknown = JSON.parse(fs.readFileSync(TASKS_STORAGE_PATH, 'utf-8'));
         if (Array.isArray(list)) {
-          this.tasks.clear();
-          for (const item of list) {
-            if (item && item.id) {
-              this.tasks.set(item.id, verifyTaskArtifact(item));
+          for (const raw of list) {
+            if (!raw || typeof raw.id !== 'string') continue;
+            const task = raw as AgentTask;
+            if (task.status === 'running' || task.status === 'queued') {
+              task.status = 'blocked';
+              task.blockedReason = 'Serwer uruchomił się ponownie; wykonawca zadania nie został odtworzony.';
+              task.error = task.blockedReason;
+              task.logs = Array.isArray(task.logs) ? task.logs : [];
+              task.logs.push(`[${new Date().toISOString()}] Wstrzymano zadanie po restarcie; wymagane jawne ponowienie.`);
             }
+            this.tasks.set(task.id, verifyTaskArtifact(task));
           }
-          return;
         }
-      } catch (err) {
-        console.warn('[AGENT_TASKS] Błąd wczytywania rejestru zadań:', err);
+      } catch (error) {
+        console.warn('[AGENT_TASKS] Nie można wczytać rejestru zadań:', error);
       }
     }
 
-    // Seed default tasks
-    const defaults = seedDefaultTasks();
-    for (const t of defaults) {
-      this.tasks.set(t.id, t);
+    if (fs.existsSync(TASK_AUDIT_PATH)) {
+      try {
+        this.notifications = fs.readFileSync(TASK_AUDIT_PATH, 'utf-8')
+          .split('\n')
+          .filter(Boolean)
+          .slice(-500)
+          .flatMap((line) => {
+            try {
+              const event = JSON.parse(line) as TaskNotification;
+              return ['task.blocked', 'task.completed', 'task.failed', 'task.retry_scheduled'].includes(event.event)
+                ? [event]
+                : [];
+            } catch {
+              return [];
+            }
+          });
+      } catch (error) {
+        console.warn('[AGENT_TASKS] Nie można wczytać dziennika audytu:', error);
+      }
     }
     this.saveToDisk();
   }
@@ -204,26 +146,50 @@ class AgentTaskRegistry {
   private saveToDisk(): void {
     ensureDataDir();
     try {
-      const list = Array.from(this.tasks.values());
-      fs.writeFileSync(TASKS_STORAGE_PATH, JSON.stringify(list, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('[AGENT_TASKS] Błąd zapisu rejestru zadań:', err);
+      fs.writeFileSync(TASKS_STORAGE_PATH, JSON.stringify([...this.tasks.values()], null, 2), 'utf-8');
+    } catch (error) {
+      console.error('[AGENT_TASKS] Nie można zapisać rejestru zadań:', error);
+    }
+  }
+
+  private audit(task: AgentTask, event: string): void {
+    const notification = {
+      id: randomUUID(),
+      taskId: task.id,
+      event,
+      status: task.status,
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      fs.appendFileSync(TASK_AUDIT_PATH, `${JSON.stringify(notification)}\n`, 'utf-8');
+    } catch (error) {
+      console.error('[AGENT_TASKS] Nie można zapisać dziennika audytu:', error);
+    }
+    if (['task.blocked', 'task.completed', 'task.failed', 'task.retry_scheduled'].includes(event)) {
+      this.notifications.push(notification);
+      this.notifications = this.notifications.slice(-100);
     }
   }
 
   public getAll(): AgentTask[] {
-    const list = Array.from(this.tasks.values()).map(verifyTaskArtifact);
-    return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const tasks = [...this.tasks.values()].map(verifyTaskArtifact);
+    this.saveToDisk();
+    return tasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  public getStats(): { total: number; queued: number; running: number; completed: number; failed: number } {
+  public getNotifications(): TaskNotification[] {
+    return [...this.notifications].slice(-50).reverse();
+  }
+
+  public getStats(): { total: number; queued: number; running: number; completed: number; failed: number; blocked: number } {
     const all = this.getAll();
     return {
       total: all.length,
-      queued: all.filter((t) => t.status === 'queued').length,
-      running: all.filter((t) => t.status === 'running').length,
-      completed: all.filter((t) => t.status === 'completed').length,
-      failed: all.filter((t) => t.status === 'failed').length,
+      queued: all.filter((task) => task.status === 'queued').length,
+      running: all.filter((task) => task.status === 'running').length,
+      completed: all.filter((task) => task.status === 'completed').length,
+      failed: all.filter((task) => task.status === 'failed').length,
+      blocked: all.filter((task) => task.status === 'blocked').length,
     };
   }
 
@@ -232,292 +198,318 @@ class AgentTaskRegistry {
     return task ? verifyTaskArtifact(task) : undefined;
   }
 
-  public cancel(id: string): boolean {
-    const task = this.tasks.get(id);
-    if (!task) return false;
-
-    if (task.status === 'running') {
-      const controller = this.runningExecutors.get(id);
-      if (controller) {
-        controller.abort();
-        this.runningExecutors.delete(id);
-      }
-      task.status = 'failed';
-      task.error = 'Zadanie przerwane przez operatora.';
-      task.completedAt = new Date().toISOString();
-      task.logs.push(`[${new Date().toISOString()}] Zadanie zostało anulowane przez operatora.`);
-      this.saveToDisk();
-      return true;
-    }
-
-    if (task.status === 'queued') {
-      task.status = 'failed';
-      task.error = 'Zadanie wycofane z kolejki.';
-      task.completedAt = new Date().toISOString();
-      task.logs.push(`[${new Date().toISOString()}] Zadanie wycofane z kolejki.`);
-      this.saveToDisk();
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Real task executor:
-   * - Sets state to 'running' with an active AbortController executor
-   * - Performs actual work on disk (creating or verifying artifacts)
-   * - Only transitions to 'completed' once the artifact is confirmed on disk
-   */
   public async runTask(params: {
     agent: AgentTask['agent'];
     title: string;
     description: string;
     actionType: string;
-    payload?: Record<string, any>;
-    aiExecutor?: (
-      task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
-      signal: AbortSignal,
-    ) => Promise<{ text: string; provider: string; model: string }>;
+    payload?: Record<string, unknown>;
+    dependsOn?: string[];
+    scheduledAt?: string;
+    requiresApproval?: boolean;
+    timeoutMs?: number;
+    aiExecutor?: TaskJob['aiExecutor'];
   }): Promise<AgentTask> {
-    const taskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
+    const dependencies = params.dependsOn || [];
+    if (dependencies.length > 20 || new Set(dependencies).size !== dependencies.length
+      || dependencies.some((id) => !this.tasks.has(id))) {
+      throw new Error('Zależności muszą wskazywać maksymalnie 20 istniejących, unikalnych zadań.');
+    }
+    if (params.scheduledAt && !Number.isFinite(Date.parse(params.scheduledAt))) {
+      throw new Error('Nieprawidłowy termin harmonogramu.');
+    }
+    if (params.timeoutMs !== undefined
+      && (!Number.isInteger(params.timeoutMs) || params.timeoutMs < 100 || params.timeoutMs > MAX_TIMEOUT_MS)) {
+      throw new Error(`Limit czasu musi wynosić od 100 do ${MAX_TIMEOUT_MS} ms.`);
+    }
 
+    const now = new Date().toISOString();
+    const id = `task-${randomUUID()}`;
     const task: AgentTask = {
-      id: taskId,
+      id,
       agent: params.agent,
       title: params.title,
       description: params.description,
       status: 'queued',
       createdAt: now,
-      logs: [`[${now}] Zadanie zarejestrowane w kolejce.`],
+      scheduledAt: params.scheduledAt,
+      dependsOn: dependencies,
+      attempts: 0,
+      maxAttempts: MAX_ATTEMPTS,
+      timeoutMs: params.timeoutMs || DEFAULT_TIMEOUT_MS,
+      requiresApproval: params.requiresApproval ?? ['scaffold_app', 'write_app_file'].includes(params.actionType),
+      logs: [`[${now}] Zadanie zarejestrowano; autonomiczne wykonanie wymaga dostępnego wykonawcy.`],
     };
+    this.tasks.set(id, task);
 
-    this.tasks.set(taskId, task);
+    if (params.actionType !== 'ai_task' || params.aiExecutor) {
+      this.jobs.set(id, {
+        actionType: params.actionType,
+        payload: params.payload || {},
+        aiExecutor: params.aiExecutor,
+      });
+    }
+
+    this.audit(task, 'task.created');
+    this.refreshReadiness(task);
     this.saveToDisk();
-
-    // Start execution asynchronously
-    void this.executeTask(taskId, params.actionType, params.payload, params.aiExecutor);
-
+    void this.processQueue();
     return task;
   }
 
-  private async executeTask(
-    taskId: string,
-    actionType: string,
-    payload: Record<string, any> = {},
-    aiExecutor?: (
-      task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
-      signal: AbortSignal,
-    ) => Promise<{ text: string; provider: string; model: string }>,
-  ): Promise<void> {
-    const task = this.tasks.get(taskId);
-    if (!task) return;
+  private refreshReadiness(task: AgentTask): void {
+    if (task.status === 'running' || task.status === 'completed' || task.status === 'failed') return;
 
+    let reason: string | undefined;
+    if (!this.jobs.has(task.id)) {
+      reason = 'Brak rzeczywistego wykonawcy dla tego zadania.';
+    } else if (task.requiresApproval && !task.approvedAt) {
+      reason = 'Oczekiwanie na zatwierdzenie operatora.';
+    } else {
+      const dependencies = task.dependsOn.map((id) => this.tasks.get(id));
+      if (dependencies.some((dependency) => !dependency || dependency.status !== 'completed')) {
+        reason = 'Oczekiwanie na ukończenie wszystkich zależności.';
+      }
+    }
+
+    if (reason) {
+      if (task.status !== 'blocked' || task.blockedReason !== reason) {
+        task.status = 'blocked';
+        task.blockedReason = reason;
+        task.error = reason;
+        task.logs.push(`[${new Date().toISOString()}] Zablokowano: ${reason}`);
+        this.audit(task, 'task.blocked');
+      }
+      return;
+    }
+    task.blockedReason = undefined;
+    if (task.status === 'blocked') task.status = 'queued';
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
+    try {
+      while (true) {
+        const now = Date.now();
+        const task = [...this.tasks.values()]
+          .filter((candidate) => candidate.status === 'queued' || candidate.status === 'blocked')
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+          .find((candidate) => {
+            this.refreshReadiness(candidate);
+            const readyAt = Math.max(
+              candidate.scheduledAt ? Date.parse(candidate.scheduledAt) : 0,
+              candidate.retryAt ? Date.parse(candidate.retryAt) : 0,
+            );
+            return candidate.status === 'queued' && readyAt <= now;
+          });
+        if (!task) break;
+        const job = this.jobs.get(task.id);
+        if (!job) continue;
+        await this.executeTask(task, job);
+      }
+    } finally {
+      this.processing = false;
+      this.saveToDisk();
+    }
+  }
+
+  private async executeTask(task: AgentTask, job: TaskJob): Promise<void> {
     const controller = new AbortController();
-    this.runningExecutors.set(taskId, controller);
-
+    this.runningExecutors.set(task.id, controller);
     task.status = 'running';
+    task.error = undefined;
     task.startedAt = new Date().toISOString();
-    task.logs.push(`[${task.startedAt}] Rozpoczęto wykonywanie zadania przez agenta ${task.agent}.`);
+    task.attempts += 1;
+    task.logs.push(`[${task.startedAt}] Wykonawca rozpoczął próbę ${task.attempts}/${task.maxAttempts}.`);
+    this.audit(task, 'task.running');
     this.saveToDisk();
 
-    const appendLog = (msg: string) => {
-      task.logs.push(`[${new Date().toISOString()}] ${msg}`);
-      this.saveToDisk();
-    };
-
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      if (controller.signal.aborted) {
-        throw new Error('Przerwano przed rozpoczęciem.');
+      const operation = this.performAction(task, job, controller.signal);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error(`Przekroczono limit czasu zadania (${task.timeoutMs} ms).`));
+        }, task.timeoutMs);
+      });
+      const cancelledPromise = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener('abort', () => reject(new Error('Zadanie przerwane przez operatora.')), { once: true });
+      });
+      const result = await Promise.race([operation, timeoutPromise, cancelledPromise]);
+      if (controller.signal.aborted) throw new Error('Zadanie przerwane przez operatora.');
+      task.artifact = result.artifact;
+      task.result = result.result;
+      task.status = 'completed';
+      task.completedAt = new Date().toISOString();
+      task.logs.push(`[${task.completedAt}] Zadanie ukończone; potwierdzono artefakt ${task.artifact.path}.`);
+      this.audit(task, 'task.completed');
+      this.jobs.delete(task.id);
+    } catch (error) {
+      if (task.status !== 'running') return;
+      task.error = error instanceof Error ? error.message : String(error);
+      if (job.actionType === 'ai_task' && task.attempts < task.maxAttempts && !controller.signal.aborted) {
+        task.status = 'queued';
+        task.retryAt = new Date(Date.now() + 1000 * (2 ** (task.attempts - 1))).toISOString();
+        task.logs.push(`[${new Date().toISOString()}] Błąd wykonawcy AI; zaplanowano ponowienie.`);
+        this.audit(task, 'task.retry_scheduled');
+      } else {
+        task.status = 'failed';
+        task.completedAt = new Date().toISOString();
+        task.logs.push(`[${task.completedAt}] Zadanie zakończone błędem: ${task.error}`);
+        this.audit(task, 'task.failed');
       }
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      this.runningExecutors.delete(task.id);
+      this.saveToDisk();
+    }
+  }
 
-      if (actionType === 'ai_task') {
-        if (!aiExecutor) {
-          throw new Error('Brak wykonawcy modelu AI dla tego zadania.');
-        }
-        appendLog('Wysyłanie zadania do skonfigurowanego modelu AI...');
-        const response = await aiExecutor(task, controller.signal);
-        if (!response.text.trim()) {
-          throw new Error('Model AI zwrócił pustą odpowiedź.');
-        }
+  private async performAction(
+    task: AgentTask,
+    job: TaskJob,
+    signal: AbortSignal,
+  ): Promise<{ result: string; artifact: AgentTaskArtifact }> {
+    if (signal.aborted) throw new Error('Zadanie przerwane przez operatora.');
+    if (job.actionType === 'ai_task') {
+      if (!job.aiExecutor) throw new Error('Brak wykonawcy modelu AI dla tego zadania.');
+      const response = await job.aiExecutor(task, signal);
+      if (!response.text.trim()) throw new Error('Model AI zwrócił pustą odpowiedź.');
+      const reportsDir = path.resolve('exports', 'agent_tasks');
+      fs.mkdirSync(reportsDir, { recursive: true });
+      const reportPath = path.join(reportsDir, `${task.id}.md`);
+      fs.writeFileSync(reportPath, [
+        `# ${task.title}`,
+        '',
+        `Agent: ${task.agent}`,
+        `Provider: ${response.provider} (${response.model})`,
+        '',
+        response.text,
+        '',
+      ].join('\n'), 'utf-8');
+      return {
+        result: response.text,
+        artifact: { path: path.relative(path.resolve('.'), reportPath), name: path.basename(reportPath), sizeBytes: fs.statSync(reportPath).size },
+      };
+    }
 
-        const reportsDir = path.resolve('exports', 'agent_tasks');
-        fs.mkdirSync(reportsDir, { recursive: true });
-        const reportPath = path.join(reportsDir, `${taskId}.md`);
-        fs.writeFileSync(reportPath, [
-          `# ${task.title}`,
-          '',
-          `Agent: ${task.agent}`,
-          `Provider: ${response.provider} (${response.model})`,
-          '',
-          response.text,
-          '',
-        ].join('\n'), 'utf-8');
+    if (job.actionType === 'audit_system_integrity') {
+      const checks = {
+        server_entrypoint: fs.existsSync(path.resolve('server.ts')),
+        package_manifest: fs.existsSync(path.resolve('package.json')),
+        apps_directory: fs.statSync(path.resolve('apps')).isDirectory(),
+        task_executor: fs.existsSync(path.resolve('src/kernel/agentTasks.ts')),
+      };
+      const reportPath = path.resolve('exports', 'system_integrity_report.json');
+      fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+      fs.writeFileSync(reportPath, JSON.stringify({
+        timestamp: new Date().toISOString(),
+        agent: task.agent,
+        status: 'CHECKS_COMPLETED',
+        checks,
+      }, null, 2), 'utf-8');
+      return {
+        result: `Wykonano ${Object.values(checks).filter(Boolean).length}/${Object.keys(checks).length} kontroli.`,
+        artifact: { path: path.relative(path.resolve('.'), reportPath), name: path.basename(reportPath), sizeBytes: fs.statSync(reportPath).size },
+      };
+    }
 
-        task.artifact = {
-          path: path.relative(path.resolve('.'), reportPath),
-          name: path.basename(reportPath),
-          sizeBytes: fs.statSync(reportPath).size,
-        };
-        task.result = response.text;
-        appendLog(`Model ${response.provider} (${response.model}) przygotował odpowiedź.`);
-      } else if (actionType === 'audit_system_integrity') {
-        appendLog('Skanowanie spójności plików jądra i konfiguracji...');
-        await new Promise((r) => setTimeout(r, 600));
+    if (job.actionType === 'scaffold_app' || job.actionType === 'write_app_file') {
+      const rawAppId = job.payload.appId ?? job.payload.targetAppId ?? 'bastilla_os_2';
+      if (typeof rawAppId !== 'string' || !SAFE_APP_ID.test(rawAppId)) {
+        throw new Error('Nieprawidłowy identyfikator aplikacji.');
+      }
+      const appsRoot = path.resolve('apps');
+      const appDir = path.resolve(appsRoot, rawAppId);
+      if (!appDir.startsWith(`${appsRoot}${path.sep}`)) throw new Error('Ścieżka aplikacji jest niedozwolona.');
 
-        const exportsDir = path.resolve('exports');
-        if (!fs.existsSync(exportsDir)) {
-          fs.mkdirSync(exportsDir, { recursive: true });
-        }
-
-        const reportPath = path.join(exportsDir, 'system_integrity_report.json');
-        const reportData = {
-          timestamp: new Date().toISOString(),
-          agent: task.agent,
-          status: 'INTEGRITY_VERIFIED',
-          checks: {
-            server_entrypoint: fs.existsSync(path.resolve('server.ts')),
-            package_manifest: fs.existsSync(path.resolve('package.json')),
-            apps_directory: fs.existsSync(path.resolve('apps')),
-            data_directory: fs.existsSync(path.resolve('data')),
-          },
-        };
-
-        fs.writeFileSync(reportPath, JSON.stringify(reportData, null, 2), 'utf-8');
-        appendLog(`Zapisano raport integralności: ${reportPath}`);
-
-        task.artifact = {
-          path: 'exports/system_integrity_report.json',
-          name: 'system_integrity_report.json',
-          sizeBytes: fs.statSync(reportPath).size,
-        };
-        task.result = `Raport integralności wygenerowany pomyślnie (${task.artifact.sizeBytes} B).`;
-      } else if (actionType === 'scaffold_app') {
-        const appId = payload.targetAppId || 'bastilla_os_2';
-        appendLog(`Weryfikacja/tworzenie struktury aplikacji apps/${appId}...`);
-        await new Promise((r) => setTimeout(r, 400));
-
-        const appDir = path.resolve('apps', appId);
-        if (!fs.existsSync(appDir)) {
-          fs.mkdirSync(appDir, { recursive: true });
-        }
-
+      if (job.actionType === 'scaffold_app') {
+        fs.mkdirSync(appDir, { recursive: true });
         const manifestPath = path.join(appDir, 'app.json');
         if (!fs.existsSync(manifestPath)) {
-          const manifest = {
-            id: appId,
-            name: appId.replace(/[-_]/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+          fs.writeFileSync(manifestPath, JSON.stringify({
+            id: rawAppId,
+            name: rawAppId.replace(/[-_]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
             type: 'html5-web',
             version: '2.0.0',
             author: task.agent,
-            description: `Interfejs operacyjny Bastilla OS 2 w tonacji kości słoniowej i złota.`,
             entry: 'index.html',
             status: 'ready',
             created_at: new Date().toISOString(),
-            files: ['index.html', 'app.json'],
-          };
-          fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
-          appendLog(`Utworzono manifest aplikacji: ${manifestPath}`);
+            files: ['app.json'],
+          }, null, 2), 'utf-8');
         }
-
-        task.artifact = {
-          path: `apps/${appId}/app.json`,
-          name: 'app.json',
-          sizeBytes: fs.statSync(manifestPath).size,
+        const stats = fs.statSync(manifestPath);
+        return {
+          result: `Manifest aplikacji ${rawAppId} zweryfikowano na dysku.`,
+          artifact: { path: path.relative(path.resolve('.'), manifestPath), name: path.basename(manifestPath), sizeBytes: stats.size },
         };
-        task.result = `Aplikacja ${appId} zweryfikowana. Manifest gotowy na dysku.`;
-      } else if (actionType === 'write_app_file') {
-        const appId = payload.appId || 'bastilla_os_2';
-        const filename = payload.filename || 'config.json';
-        const content = payload.content || JSON.stringify({ updated: true, agent: task.agent, timestamp: new Date().toISOString() }, null, 2);
-
-        appendLog(`Zapisywanie pliku ${filename} do apps/${appId}...`);
-        const appDir = path.resolve('apps', appId);
-        if (!fs.existsSync(appDir)) {
-          fs.mkdirSync(appDir, { recursive: true });
-          appendLog(`Utworzono brakujący katalog aplikacji apps/${appId}.`);
-        }
-
-        const filePath = path.join(appDir, filename);
-        fs.writeFileSync(filePath, content, 'utf-8');
-        appendLog(`Zapisano plik apps/${appId}/${filename}.`);
-
-        const mPath = path.join(appDir, 'app.json');
-        if (fs.existsSync(mPath)) {
-          try {
-            const m = JSON.parse(fs.readFileSync(mPath, 'utf-8'));
-            if (Array.isArray(m.files) && !m.files.includes(filename)) {
-              m.files.push(filename);
-              fs.writeFileSync(mPath, JSON.stringify(m, null, 2), 'utf-8');
-            }
-          } catch {}
-        } else {
-          const manifest = {
-            id: appId,
-            name: appId,
-            type: 'html5-web',
-            version: '1.0.0',
-            author: task.agent,
-            description: `Aplikacja ${appId}`,
-            entry: filename,
-            status: 'ready',
-            created_at: new Date().toISOString(),
-            files: [filename],
-          };
-          fs.writeFileSync(mPath, JSON.stringify(manifest, null, 2), 'utf-8');
-          appendLog(`Utworzono manifest app.json dla apps/${appId}.`);
-        }
-
-        task.artifact = {
-          path: `apps/${appId}/${filename}`,
-          name: filename,
-          sizeBytes: fs.statSync(filePath).size,
-        };
-        task.result = `Plik ${filename} w aplikacji ${appId} zapisany (${task.artifact.sizeBytes} B).`;
-      } else if (actionType === 'generic_diag') {
-        const exportsDir = path.resolve('exports');
-        if (!fs.existsSync(exportsDir)) {
-          fs.mkdirSync(exportsDir, { recursive: true });
-        }
-        const diagPath = path.join(exportsDir, `diag_${task.agent.toLowerCase()}_${Date.now()}.json`);
-        const diag = {
-          taskId,
-          agent: task.agent,
-          title: task.title,
-          timestamp: new Date().toISOString(),
-          systemStatus: 'ONLINE',
-          completed: true,
-        };
-        fs.writeFileSync(diagPath, JSON.stringify(diag, null, 2), 'utf-8');
-        appendLog(`Zakończono operację diagnostyczną i utworzono artefakt.`);
-
-        task.artifact = {
-          path: path.relative(path.resolve('.'), diagPath),
-          name: path.basename(diagPath),
-          sizeBytes: fs.statSync(diagPath).size,
-        };
-        task.result = `Operacja zakończona pomyślnie.`;
-      } else {
-        throw new Error(`Nieobsługiwany typ akcji: ${actionType}`);
       }
 
-      // STRICT VALIDATION: completed requires artifact on disk
-      if (!task.artifact || !fs.existsSync(path.resolve(task.artifact.path))) {
-        throw new Error('Wykonawca zakończył działanie, ale nie utworzył wymaganego pliku artefaktu.');
+      const filename = job.payload.filename ?? 'config.json';
+      const content = job.payload.content ?? JSON.stringify({ updated: true, agent: task.agent, timestamp: new Date().toISOString() }, null, 2);
+      if (typeof filename !== 'string' || !SAFE_FILENAME.test(filename)
+        || !EDITABLE_EXTENSIONS.has(path.extname(filename).toLowerCase())
+        || typeof content !== 'string' || content.length > 20_000) {
+        throw new Error('Nieprawidłowa nazwa pliku lub treść (limit 20 000 znaków).');
       }
-
-      task.status = 'completed';
-      task.completedAt = new Date().toISOString();
-      appendLog(`Zadanie zakończone sukcesem. Artefakt potwierdzony: ${task.artifact.path}`);
-    } catch (err: any) {
-      task.status = 'failed';
-      task.error = err?.message || String(err);
-      task.completedAt = new Date().toISOString();
-      appendLog(`BŁĄD: ${task.error}`);
-    } finally {
-      this.runningExecutors.delete(taskId);
-      this.saveToDisk();
+      fs.mkdirSync(appDir, { recursive: true });
+      const realAppsRoot = fs.realpathSync(appsRoot);
+      const realAppDir = fs.realpathSync(appDir);
+      if (!realAppDir.startsWith(`${realAppsRoot}${path.sep}`)) throw new Error('Katalog aplikacji prowadzi poza apps/.');
+      const filePath = path.resolve(realAppDir, filename);
+      if (!filePath.startsWith(`${realAppDir}${path.sep}`)) throw new Error('Ścieżka pliku jest niedozwolona.');
+      fs.writeFileSync(filePath, content, 'utf-8');
+      const stats = fs.statSync(filePath);
+      return {
+        result: `Plik ${filename} w aplikacji ${rawAppId} zapisano (${stats.size} B).`,
+        artifact: { path: path.relative(path.resolve('.'), filePath), name: filename, sizeBytes: stats.size },
+      };
     }
+
+    throw new Error(`Nieobsługiwany typ akcji: ${job.actionType}`);
+  }
+
+  public approve(id: string): boolean {
+    const task = this.tasks.get(id);
+    if (!task || task.status !== 'blocked' || !task.requiresApproval || task.approvedAt || !this.jobs.has(id)) return false;
+    task.approvedAt = new Date().toISOString();
+    task.logs.push(`[${task.approvedAt}] Operator zatwierdził wykonanie zadania.`);
+    this.audit(task, 'task.approved');
+    this.refreshReadiness(task);
+    this.saveToDisk();
+    void this.processQueue();
+    return true;
+  }
+
+  public retry(id: string): boolean {
+    const task = this.tasks.get(id);
+    if (!task || task.status !== 'failed' || task.attempts >= task.maxAttempts || !this.jobs.has(id)) return false;
+    task.status = 'queued';
+    task.error = undefined;
+    task.completedAt = undefined;
+    task.retryAt = undefined;
+    task.logs.push(`[${new Date().toISOString()}] Operator ręcznie ponowił zadanie.`);
+    this.audit(task, 'task.retry_requested');
+    this.saveToDisk();
+    void this.processQueue();
+    return true;
+  }
+
+  public cancel(id: string): boolean {
+    const task = this.tasks.get(id);
+    if (!task || (task.status !== 'running' && task.status !== 'queued')) return false;
+    const controller = this.runningExecutors.get(id);
+    if (controller) controller.abort();
+    task.status = 'failed';
+    task.error = 'Zadanie przerwane przez operatora.';
+    task.completedAt = new Date().toISOString();
+    task.logs.push(`[${task.completedAt}] Operator przerwał zadanie.`);
+    this.audit(task, 'task.failed');
+    this.saveToDisk();
+    return true;
   }
 }
 
