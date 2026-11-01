@@ -2681,6 +2681,26 @@ function pushSystemLog(
 
 }
 
+// Public activity feed exposes only vetted event categories and minimal metadata.
+// Never forward raw log messages: they may contain commands, paths or credentials.
+app.get('/api/agents/activity', (_req, res) => {
+  const allowed = /\\[(?:GITHUB AUTO|GIT AUTO|GIT|GITHUB|CHAT EXEC|DEPLOY|STUDIO APLIKACJI)\\]/;
+  const events = systemLogs.filter(entry => allowed.test(entry.message)).slice(-40).map(entry => {
+    const match = entry.message.match(/\\[(GITHUB AUTO|GIT AUTO|GIT|GITHUB|CHAT EXEC|DEPLOY|STUDIO APLIKACJI)\\]/);
+    const category = match?.[1] || 'SYSTEM';
+    const commit = entry.message.match(/\\b[0-9a-f]{7,40}\\b/i)?.[0];
+    return {
+      id: entry.id,
+      timestamp: entry.timestamp,
+      category,
+      status: entry.level === 'error' ? 'error' : entry.level === 'warn' ? 'warning' : 'reported',
+      ...(commit ? { commit } : {}),
+    };
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ events, source: 'server-log', note: 'Zdarzenia serwera, nie dowód autonomicznej pracy konkretnego agenta.' });
+});
+
 function scanSystemLogs(reason: string): string {
   const unresolved = systemLogs.filter((log) =>
     (log.level === 'error' || log.level === 'warn') && !log.healed
