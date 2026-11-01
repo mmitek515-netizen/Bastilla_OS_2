@@ -6356,13 +6356,14 @@ app.get('/api/agent-tasks', (_req, res) => {
     success: true,
     tasks: agentTaskRegistry.getAll(),
     stats: agentTaskRegistry.getStats(),
+    notifications: agentTaskRegistry.getNotifications(),
   });
 });
 
 app.post('/api/agent-tasks/run', async (req, res) => {
   if (!authorizeAgentTasks(req, res)) return;
   try {
-    const { agent, title, description, executionType, actionType, targetAppId } = req.body;
+    const { agent, title, description, executionType, actionType, targetAppId, dependsOn, scheduledAt, timeoutMs } = req.body;
     if (!agent || !title || !description) {
       return res.status(400).json({ success: false, error: 'Wymagane pola: agent, title, description.' });
     }
@@ -6375,17 +6376,36 @@ app.post('/api/agent-tasks/run', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Tytuł lub opis zadania ma nieprawidłowy format albo długość.' });
     }
     const requestedAction = String(actionType || executionType || 'ai_task');
-    const taskActions = ['ai_task', 'audit_system_integrity', 'scaffold_app', 'write_app_file', 'generic_diag'];
+    const taskActions = ['ai_task', 'audit_system_integrity', 'scaffold_app', 'write_app_file'];
     if (!taskActions.includes(requestedAction)) {
       return res.status(400).json({ success: false, error: 'Nieobsługiwany typ akcji.' });
+    }
+    if (targetAppId !== undefined && (typeof targetAppId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/.test(targetAppId))) {
+      return res.status(400).json({ success: false, error: 'Nieprawidłowy identyfikator aplikacji.' });
+    }
+    if (dependsOn !== undefined && (!Array.isArray(dependsOn) || dependsOn.length > 20
+      || new Set(dependsOn).size !== dependsOn.length
+      || dependsOn.some((id: unknown) => typeof id !== 'string' || id.length > 100 || !agentTaskRegistry.getById(id)))) {
+      return res.status(400).json({ success: false, error: 'Zależności muszą być listą maksymalnie 20 identyfikatorów zadań.' });
+    }
+    if (scheduledAt !== undefined && (typeof scheduledAt !== 'string' || !Number.isFinite(Date.parse(scheduledAt))
+      || Date.parse(scheduledAt) > Date.now() + 366 * 24 * 60 * 60 * 1000)) {
+      return res.status(400).json({ success: false, error: 'Nieprawidłowy termin harmonogramu (maksymalnie rok w przyszłości).' });
+    }
+    if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 10 * 60_000)) {
+      return res.status(400).json({ success: false, error: 'Limit czasu musi wynosić od 100 do 600000 ms.' });
     }
     const task = await agentTaskRegistry.runTask({
       agent,
       title: title.trim(),
       description: description.trim(),
       actionType: requestedAction,
-      payload: { targetAppId: targetAppId || 'bastilla_os_2' },
-      ...(requestedAction === 'ai_task' ? {
+      payload: { appId: targetAppId || 'bastilla_os_2' },
+      dependsOn,
+      scheduledAt,
+      timeoutMs,
+      requiresApproval: ['scaffold_app', 'write_app_file'].includes(requestedAction),
+      ...(requestedAction === 'ai_task' && configuredProviders(LLM_CHAIN_CONFIG).length > 0 ? {
         aiExecutor: async (task, signal) => {
           const chatAgent: ChatAgentName = task.agent === 'Aria' ? 'si_1'
             : task.agent === 'Operator' ? 'Alex' : task.agent;
@@ -6408,11 +6428,29 @@ app.post('/api/agent-tasks/run', async (req, res) => {
 app.post('/api/agent-tasks/cancel', (req, res) => {
   if (!authorizeAgentTasks(req, res)) return;
   const { id } = req.body;
-  if (!id) {
+  if (typeof id !== 'string' || !id) {
     return res.status(400).json({ success: false, error: 'Brak identyfikatora zadania.' });
   }
   const success = agentTaskRegistry.cancel(id);
   return res.json({ success });
+});
+
+app.post('/api/agent-tasks/:id/approve', (req, res) => {
+  if (!authorizeAgentTasks(req, res)) return;
+  const success = agentTaskRegistry.approve(req.params.id);
+  return res.status(success ? 200 : 409).json({
+    success,
+    error: success ? undefined : 'Zadanie nie oczekuje na zatwierdzenie lub nie ma dostępnego wykonawcy.',
+  });
+});
+
+app.post('/api/agent-tasks/:id/retry', (req, res) => {
+  if (!authorizeAgentTasks(req, res)) return;
+  const success = agentTaskRegistry.retry(req.params.id);
+  return res.status(success ? 200 : 409).json({
+    success,
+    error: success ? undefined : 'Zadanie nie może być ponowione (stan, limit prób lub brak wykonawcy).',
+  });
 });
 
 // --- TRIADA MISSION BOOTSTRAP: BUILD_BEST_OS (ROOT RING-0 + AUTONOMIA W TLE) ---
@@ -6629,5 +6667,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
-

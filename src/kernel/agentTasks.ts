@@ -49,17 +49,24 @@ type TaskNotification = {
   timestamp: string;
 };
 
-const TASKS_STORAGE_PATH = path.resolve('data', 'agent_tasks.json');
-const TASK_AUDIT_PATH = path.resolve('data', 'agent_task_audit.jsonl');
+const TASKS_DATA_DIR = path.resolve(process.env.BASTILLA_AGENT_TASKS_DIR || 'data');
+const TASKS_STORAGE_PATH = path.join(TASKS_DATA_DIR, 'agent_tasks.json');
+const TASK_AUDIT_PATH = path.join(TASKS_DATA_DIR, 'agent_task_audit.jsonl');
 const MAX_ATTEMPTS = 3;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 10 * 60_000;
+const LEGACY_SEEDED_TASK_IDS = new Set([
+  'task-bastilla-os-2-scaffold',
+  'task-system-snapshot-vm',
+  'task-sqlite-integrity-audit',
+  'task-ollama-runtime-check',
+]);
 const SAFE_APP_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/;
 const SAFE_FILENAME = /^(?!app\.json$)[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/i;
 const EDITABLE_EXTENSIONS = new Set(['.html', '.css', '.js', '.mjs', '.cjs', '.json', '.md', '.txt', '.py']);
 
 function ensureDataDir(): void {
-  fs.mkdirSync(path.dirname(TASKS_STORAGE_PATH), { recursive: true });
+  fs.mkdirSync(TASKS_DATA_DIR, { recursive: true });
 }
 
 function verifyTaskArtifact(task: AgentTask): AgentTask {
@@ -98,6 +105,7 @@ class AgentTaskRegistry {
 
   private loadFromDisk(): void {
     ensureDataDir();
+    const recoveredTasks: AgentTask[] = [];
     if (fs.existsSync(TASKS_STORAGE_PATH)) {
       try {
         const list: unknown = JSON.parse(fs.readFileSync(TASKS_STORAGE_PATH, 'utf-8'));
@@ -105,14 +113,31 @@ class AgentTaskRegistry {
           for (const raw of list) {
             if (!raw || typeof raw.id !== 'string') continue;
             const task = raw as AgentTask;
+            task.logs = Array.isArray(task.logs) ? task.logs : [];
+            task.dependsOn = Array.isArray(task.dependsOn) ? task.dependsOn : [];
+            task.attempts = Number.isInteger(task.attempts) ? task.attempts : 0;
+            task.maxAttempts = Number.isInteger(task.maxAttempts) ? task.maxAttempts : MAX_ATTEMPTS;
+            task.timeoutMs = Number.isInteger(task.timeoutMs) ? task.timeoutMs : DEFAULT_TIMEOUT_MS;
+            task.requiresApproval = Boolean(task.requiresApproval);
+            let recovered = false;
+            if (LEGACY_SEEDED_TASK_IDS.has(task.id)) {
+              task.status = 'blocked';
+              task.blockedReason = 'Wpis startowy nie potwierdza rzeczywistego wykonania.';
+              task.error = task.blockedReason;
+              delete task.artifact;
+              delete task.result;
+              task.logs.push(`[${new Date().toISOString()}] Wpis startowy przeniesiono do blocked; brak dowodu wykonania.`);
+              recovered = true;
+            }
             if (task.status === 'running' || task.status === 'queued') {
               task.status = 'blocked';
               task.blockedReason = 'Serwer uruchomił się ponownie; wykonawca zadania nie został odtworzony.';
               task.error = task.blockedReason;
-              task.logs = Array.isArray(task.logs) ? task.logs : [];
               task.logs.push(`[${new Date().toISOString()}] Wstrzymano zadanie po restarcie; wymagane jawne ponowienie.`);
+              recovered = true;
             }
             this.tasks.set(task.id, verifyTaskArtifact(task));
+            if (recovered) recoveredTasks.push(task);
           }
         }
       } catch (error) {
@@ -140,6 +165,7 @@ class AgentTaskRegistry {
         console.warn('[AGENT_TASKS] Nie można wczytać dziennika audytu:', error);
       }
     }
+    for (const task of recoveredTasks) this.audit(task, 'task.blocked');
     this.saveToDisk();
   }
 
@@ -283,7 +309,10 @@ class AgentTaskRegistry {
       return;
     }
     task.blockedReason = undefined;
-    if (task.status === 'blocked') task.status = 'queued';
+    if (task.status === 'blocked') {
+      task.status = 'queued';
+      task.error = undefined;
+    }
   }
 
   private async processQueue(): Promise<void> {
@@ -326,12 +355,14 @@ class AgentTaskRegistry {
     this.saveToDisk();
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     try {
       const operation = this.performAction(task, job, controller.signal);
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
-          controller.abort();
+          timedOut = true;
           reject(new Error(`Przekroczono limit czasu zadania (${task.timeoutMs} ms).`));
+          controller.abort();
         }, task.timeoutMs);
       });
       const cancelledPromise = new Promise<never>((_, reject) => {
@@ -348,7 +379,9 @@ class AgentTaskRegistry {
       this.jobs.delete(task.id);
     } catch (error) {
       if (task.status !== 'running') return;
-      task.error = error instanceof Error ? error.message : String(error);
+      task.error = timedOut
+        ? `Przekroczono limit czasu zadania (${task.timeoutMs} ms).`
+        : error instanceof Error ? error.message : String(error);
       if (job.actionType === 'ai_task' && task.attempts < task.maxAttempts && !controller.signal.aborted) {
         task.status = 'queued';
         task.retryAt = new Date(Date.now() + 1000 * (2 ** (task.attempts - 1))).toISOString();
@@ -427,7 +460,17 @@ class AgentTaskRegistry {
 
       if (job.actionType === 'scaffold_app') {
         fs.mkdirSync(appDir, { recursive: true });
+        const realAppsRoot = fs.realpathSync(appsRoot);
+        const realAppDir = fs.realpathSync(appDir);
+        const realRepository = fs.realpathSync('.');
+        if (!realAppsRoot.startsWith(`${realRepository}${path.sep}`)
+          || !realAppDir.startsWith(`${realAppsRoot}${path.sep}`)) {
+          throw new Error('Katalog aplikacji prowadzi poza apps/.');
+        }
         const manifestPath = path.join(appDir, 'app.json');
+        if (fs.existsSync(manifestPath) && fs.lstatSync(manifestPath).isSymbolicLink()) {
+          throw new Error('Manifest aplikacji nie może być dowiązaniem symbolicznym.');
+        }
         if (!fs.existsSync(manifestPath)) {
           fs.writeFileSync(manifestPath, JSON.stringify({
             id: rawAppId,
@@ -458,10 +501,34 @@ class AgentTaskRegistry {
       fs.mkdirSync(appDir, { recursive: true });
       const realAppsRoot = fs.realpathSync(appsRoot);
       const realAppDir = fs.realpathSync(appDir);
-      if (!realAppDir.startsWith(`${realAppsRoot}${path.sep}`)) throw new Error('Katalog aplikacji prowadzi poza apps/.');
+      const realRepository = fs.realpathSync('.');
+      if (!realAppsRoot.startsWith(`${realRepository}${path.sep}`)
+        || !realAppDir.startsWith(`${realAppsRoot}${path.sep}`)) {
+        throw new Error('Katalog aplikacji prowadzi poza apps/.');
+      }
       const filePath = path.resolve(realAppDir, filename);
       if (!filePath.startsWith(`${realAppDir}${path.sep}`)) throw new Error('Ścieżka pliku jest niedozwolona.');
+      if (fs.existsSync(filePath) && fs.lstatSync(filePath).isSymbolicLink()) {
+        throw new Error('Nie można nadpisać pliku będącego dowiązaniem symbolicznym.');
+      }
+      const manifestPath = path.join(realAppDir, 'app.json');
+      if (fs.existsSync(manifestPath) && fs.lstatSync(manifestPath).isSymbolicLink()) {
+        throw new Error('Manifest aplikacji nie może być dowiązaniem symbolicznym.');
+      }
       fs.writeFileSync(filePath, content, 'utf-8');
+      if (!fs.existsSync(manifestPath)) {
+        fs.writeFileSync(manifestPath, JSON.stringify({
+          id: rawAppId,
+          name: rawAppId,
+          type: 'html5-web',
+          version: '2.0.0',
+          author: task.agent,
+          entry: filename,
+          status: 'ready',
+          created_at: new Date().toISOString(),
+          files: [filename, 'app.json'],
+        }, null, 2), 'utf-8');
+      }
       const stats = fs.statSync(filePath);
       return {
         result: `Plik ${filename} w aplikacji ${rawAppId} zapisano (${stats.size} B).`,
@@ -500,7 +567,7 @@ class AgentTaskRegistry {
 
   public cancel(id: string): boolean {
     const task = this.tasks.get(id);
-    if (!task || (task.status !== 'running' && task.status !== 'queued')) return false;
+    if (!task || !['running', 'queued', 'blocked'].includes(task.status)) return false;
     const controller = this.runningExecutors.get(id);
     if (controller) controller.abort();
     task.status = 'failed';

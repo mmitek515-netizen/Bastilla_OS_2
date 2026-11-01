@@ -26,10 +26,17 @@ interface AgentTask {
   agent: 'Alex' | 'Astyria' | 'Aurelius' | 'Aria' | 'Operator';
   title: string;
   description: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked';
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+  scheduledAt?: string;
+  dependsOn: string[];
+  attempts: number;
+  maxAttempts: number;
+  requiresApproval: boolean;
+  approvedAt?: string;
+  blockedReason?: string;
   logs: string[];
   result?: string;
   artifact?: AgentTaskArtifact;
@@ -42,12 +49,22 @@ interface TaskStats {
   running: number;
   completed: number;
   failed: number;
+  blocked: number;
+}
+
+interface TaskNotification {
+  id: string;
+  taskId: string;
+  event: string;
+  status: AgentTask['status'];
+  timestamp: string;
 }
 
 export const BastillaOS2View: React.FC = () => {
   const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [stats, setStats] = useState<TaskStats>({ total: 0, queued: 0, running: 0, completed: 0, failed: 0 });
-  const [filter, setFilter] = useState<'all' | 'running' | 'completed' | 'failed'>('all');
+  const [notifications, setNotifications] = useState<TaskNotification[]>([]);
+  const [stats, setStats] = useState<TaskStats>({ total: 0, queued: 0, running: 0, completed: 0, failed: 0, blocked: 0 });
+  const [filter, setFilter] = useState<'all' | 'running' | 'completed' | 'failed' | 'blocked'>('all');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [runningAction, setRunningAction] = useState(false);
@@ -59,15 +76,21 @@ export const BastillaOS2View: React.FC = () => {
   const [taskTitle, setTaskTitle] = useState('Analiza zadania przez agenta AI');
   const [taskDescription, setTaskDescription] = useState('Opisz konkretnie, co agent ma przeanalizować lub przygotować.');
   const [targetAppId, setTargetAppId] = useState('bastilla_os_2');
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [taskToken, setTaskToken] = useState('');
   const [runError, setRunError] = useState('');
 
   const fetchTasks = useCallback(async () => {
     try {
-      const res = await fetch('/api/agent-tasks', { cache: 'no-store' });
+      const res = await fetch('/api/agent-tasks', {
+        cache: 'no-store',
+        headers: taskToken.trim() ? { Authorization: 'Bearer ' + taskToken.trim() } : {},
+      });
       if (res.ok) {
         const data = await res.json();
         setTasks(data.tasks || []);
+        setNotifications(data.notifications || []);
         if (data.stats) {
           setStats(data.stats);
         }
@@ -77,7 +100,7 @@ export const BastillaOS2View: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [taskToken]);
 
   useEffect(() => {
     void fetchTasks();
@@ -102,6 +125,8 @@ export const BastillaOS2View: React.FC = () => {
           description: taskDescription,
           actionType,
           targetAppId,
+          dependsOn,
+          ...(scheduledAt ? { scheduledAt: new Date(scheduledAt).toISOString() } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -137,6 +162,28 @@ export const BastillaOS2View: React.FC = () => {
       console.error('Błąd anulowania zadania:', err);
     } finally {
       setCancelingId(null);
+    }
+  };
+
+  const handleTaskDecision = async (id: string, action: 'approve' | 'retry') => {
+    if (action === 'approve' && !window.confirm('Zatwierdzić i wykonać tę operację?')) return;
+    try {
+      const res = await fetch(`/api/agent-tasks/${encodeURIComponent(id)}/${action}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(taskToken.trim() ? { Authorization: 'Bearer ' + taskToken.trim() } : {}),
+        },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setRunError(data.error || `Nie udało się ${action === 'approve' ? 'zatwierdzić' : 'ponowić'} zadania.`);
+        return;
+      }
+      await fetchTasks();
+    } catch {
+      setRunError('Nie można połączyć się z serwerem zadań.');
     }
   };
 
@@ -273,12 +320,12 @@ export const BastillaOS2View: React.FC = () => {
                 <span>Rzeczywisty Rejestr Zadań Agentów (Agent Task Registry)</span>
               </h2>
               <p className="text-xs text-[#736758] mt-0.5">
-                Stany: queued / running / completed / failed. Znaczniki czasu, logi i fizyczne artefakty.
+                Stany: queued / running / blocked / completed / failed. Zależności, harmonogram, audyt i artefakty.
               </p>
             </div>
 
             <div className="flex items-center gap-1.5 bg-[#FAF7F0] p-1 rounded-lg border border-[#E6DCB8] text-xs">
-              {(['all', 'running', 'completed', 'failed'] as const).map((mode) => (
+              {(['all', 'running', 'blocked', 'completed', 'failed'] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setFilter(mode)}
@@ -290,12 +337,19 @@ export const BastillaOS2View: React.FC = () => {
                 >
                   {mode === 'all' && `Wszystkie (${tasks.length})`}
                   {mode === 'running' && `W toku (${stats.running})`}
+                  {mode === 'blocked' && `Zablokowane (${stats.blocked})`}
                   {mode === 'completed' && `Ukończone (${stats.completed})`}
                   {mode === 'failed' && `Błędy (${stats.failed})`}
                 </button>
               ))}
             </div>
           </div>
+
+          {notifications[0] && (
+            <p role="status" aria-live="polite" className="border-b border-[#E6DCB8] bg-amber-50 px-5 py-2 text-xs text-[#594E3F]">
+              Powiadomienie: {notifications[0].event} · {notifications[0].taskId} · {new Date(notifications[0].timestamp).toLocaleString('pl-PL')}
+            </p>
+          )}
 
           {loading ? (
             <div className="p-12 text-center text-xs text-[#736758]">Ładowanie rejestru zadań…</div>
@@ -311,9 +365,10 @@ export const BastillaOS2View: React.FC = () => {
                   running: 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse',
                   queued: 'bg-blue-50 text-blue-800 border-blue-200',
                   failed: 'bg-red-50 text-red-800 border-red-200',
+                  blocked: 'bg-orange-50 text-orange-800 border-orange-200',
                 }[task.status];
 
-                const isRunning = task.status === 'running' || task.status === 'queued';
+                const isRunning = task.status === 'running' || task.status === 'queued' || task.status === 'blocked';
 
                 return (
                   <div key={task.id} className="p-5 hover:bg-[#FAF7F0]/60 transition space-y-3">
@@ -340,6 +395,22 @@ export const BastillaOS2View: React.FC = () => {
                           >
                             <Ban className="w-3 h-3" />
                             <span>{cancelingId === task.id ? '…' : 'Przerwij'}</span>
+                          </button>
+                        )}
+                        {task.status === 'blocked' && task.requiresApproval && !task.approvedAt && (
+                          <button
+                            onClick={() => void handleTaskDecision(task.id, 'approve')}
+                            className="px-2 py-1 rounded text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition"
+                          >
+                            Zatwierdź
+                          </button>
+                        )}
+                        {task.status === 'failed' && (
+                          <button
+                            onClick={() => void handleTaskDecision(task.id, 'retry')}
+                            className="px-2 py-1 rounded text-xs text-blue-800 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition"
+                          >
+                            Ponów ({task.attempts}/{task.maxAttempts})
                           </button>
                         )}
                       </div>
@@ -370,6 +441,12 @@ export const BastillaOS2View: React.FC = () => {
                         <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
                         <span>{task.error}</span>
                       </div>
+                    )}
+                    {task.scheduledAt && (
+                      <p className="text-[11px] text-[#736758]">
+                        Zaplanowano: {new Date(task.scheduledAt).toLocaleString('pl-PL')}
+                        {task.dependsOn.length > 0 && ` · Zależności: ${task.dependsOn.join(', ')}`}
+                      </p>
                     )}
 
                     {/* Expandable Logs */}
@@ -477,7 +554,6 @@ export const BastillaOS2View: React.FC = () => {
                   <option value="audit_system_integrity">Audyt integralności jądra (tworzy exports/system_integrity_report.json)</option>
                   <option value="scaffold_app">Inicjalizacja/audyt aplikacji w apps/ (tworzy app.json)</option>
                   <option value="write_app_file">Zapis bezpiecznego pliku w apps/ (tworzy katalog i manifest)</option>
-                  <option value="generic_diag">Diagnostyka systemowa (tworzy raport diagnostyczny w exports/)</option>
                 </select>
                 {actionType === 'ai_task' && (
                   <p className="mt-1 text-[11px] text-[#736758]">Model przygotuje odpowiedź; nie uruchamia poleceń ani nie zmienia plików projektu.</p>
@@ -516,6 +592,33 @@ export const BastillaOS2View: React.FC = () => {
                   required
                   className="w-full px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612]"
                 />
+              </div>
+
+              <div>
+                <label className="block font-medium text-[#594E3F] mb-1" htmlFor="agent-task-schedule">Termin wykonania (opcjonalnie)</label>
+                <input
+                  id="agent-task-schedule"
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-[#594E3F] mb-1" htmlFor="agent-task-dependencies">Zależności (opcjonalnie)</label>
+                <select
+                  id="agent-task-dependencies"
+                  multiple
+                  value={dependsOn}
+                  onChange={(e) => setDependsOn(Array.from(e.target.selectedOptions, (option) => option.value))}
+                  className="w-full min-h-20 px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612]"
+                >
+                  {tasks.filter((task) => task.status !== 'completed' && task.status !== 'failed').map((task) => (
+                    <option key={task.id} value={task.id}>{task.title} ({task.status})</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-[#736758]">Zadanie pozostanie zablokowane do zakończenia wszystkich wybranych zadań.</p>
               </div>
 
               {runError && (

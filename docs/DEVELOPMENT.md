@@ -26,6 +26,9 @@ use one writer per file and separate worktrees.
 Names in this table are responsibilities, not confirmation of agent execution.
 Do not use placeholder percentages or countdowns as evidence of completion.
 
+The bounded task scheduler's token, approval, restart, provider and cost
+limitations are documented in [Agent task queue](AGENT_TASKS.md).
+
 ## Naming
 
 - Repository: `Bastilla_OS_2`; displayed product: `Bastilla OS 2`.
