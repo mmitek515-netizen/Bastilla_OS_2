@@ -298,7 +298,16 @@ app.get('/api/ollama/models', async (_req, res) => {
   }
 });
 
-app.get('/api/ollama/diagnostics', async (_req, res) => {
+const ollamaDiagnosticRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 3,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: (_req, res) => res.status(429).json({
+    error: 'Ollama verification limit exceeded; retry after one minute.',
+  }),
+});
+app.get('/api/ollama/diagnostics', ollamaDiagnosticRateLimit, async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const cfg = LLM_CHAIN_CONFIG;
   const diagnostics = await collectOllamaDiagnostics(
