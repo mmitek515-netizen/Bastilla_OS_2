@@ -185,7 +185,7 @@ export function validateAgentProtocolRequest(value: unknown): AgentProtocolValid
     valid: true,
     request: {
       command: input.command,
-      agent: input.agent as AgentProtocolRequest['agent'],
+      agent: canonicalAgent as AgentProtocolRequest['agent'],
       ...(payload ? { payload } : {}),
     },
   };
