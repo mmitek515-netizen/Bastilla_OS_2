@@ -329,13 +329,13 @@ export default function App() {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\\n');
+          const lines = buffer.split('\n');
           buffer = lines.pop() ?? '';
           for (const line of lines) {
             if (!line.trim()) continue;
             const event = JSON.parse(line) as {type: string; agent?: string; text?: string; error?: string; state?: {store: unknown}};
             if (event.type === 'agent_reply' && event.text) {
-              combined += (combined ? '\\n\\n' : '') + (chatAgent === 'triad' ? event.agent + ':\\n' : '') + event.text;
+              combined += (combined ? '\n\n' : '') + (chatAgent === 'triad' ? event.agent + ':\n' : '') + event.text;
               setStreamedReply(combined);
             }
             if (event.type === 'error') throw new Error(event.error || 'Błąd silnika bez NLP.');
