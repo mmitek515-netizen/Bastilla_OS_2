@@ -2319,17 +2319,21 @@ Karta 'Podgląd na żywo' w Studio Aplikacji wyświetla obecnie interfejs tej ap
         output = 'Użycie: export <nazwa-aplikacji>';
       } else {
         const cleanId = target.toLowerCase();
-        const exportRes = await fetch(`http://localhost:${PORT}/api/apps/${cleanId}/export`, {
-          method: 'POST',
-          headers: internalApiHeaders(),
-        });
-        const exportData = await exportRes.json();
-        if (exportData.success) {
-          output = `[EKSPORT APLIKACJI] Sukces!
+        if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(cleanId)) {
+          output = 'Nieprawidłowy identyfikator aplikacji.';
+        } else {
+          const exportRes = await fetch(`http://localhost:${PORT}/api/apps/${cleanId}/export`, {
+            method: 'POST',
+            headers: internalApiHeaders(),
+          });
+          const exportData = await exportRes.json();
+          if (exportData.success) {
+            output = `[EKSPORT APLIKACJI] Sukces!
 Paczka aplikacji: ${exportData.archiveName}
 Plik został zapisany w katalogu /exports i jest natychmiast widoczny w zakładce 'Eksplorator RING-0'.`;
-        } else {
-          output = `[BŁĄD EKSPORTU]: ${exportData.error || 'Nieznany błąd'}`;
+          } else {
+            output = `[BŁĄD EKSPORTU]: ${exportData.error || 'Nieznany błąd'}`;
+          }
         }
       }
     } else if (action === 'inspect') {

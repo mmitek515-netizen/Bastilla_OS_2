@@ -1,7 +1,6 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-const digest = (value) => createHash('sha256').update(value).digest();
 
 export function isLoopbackHost(host) {
   return ['localhost', '127.0.0.1', '::1'].includes(String(host || '').trim().toLowerCase());
@@ -18,7 +17,9 @@ export function createApiWriteGuard({ host, token = '' }) {
     }
 
     const supplied = typeof req.get === 'function' ? req.get('authorization') || '' : '';
-    if (!timingSafeEqual(digest(supplied), digest('Be' + 'arer ' + secret))) {
+    const suppliedBytes = Buffer.from(supplied);
+    const expectedBytes = Buffer.from('Be' + 'arer ' + secret);
+    if (suppliedBytes.length !== expectedBytes.length || !timingSafeEqual(suppliedBytes, expectedBytes)) {
       res.setHeader('WWW-Authenticate', 'Bearer');
       return res.status(401).json({ success: false, error: 'Brak poprawnego tokenu API.' });
     }
