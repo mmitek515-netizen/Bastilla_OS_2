@@ -512,9 +512,21 @@ export default function App() {
           />
 
         <main className={`flex min-w-0 flex-1 flex-col overflow-x-hidden ${activeTab === 'comms' || activeTab === 'terminal' ? 'min-h-[75dvh] w-full lg:min-h-[calc(100dvh-7rem)]' : 'min-h-0'}`}>
-          {activeTab === 'home' && <SystemResourceMeters />}
-          {activeTab === 'home' && <OllamaModelManager />}
-          {activeTab === 'home' && <BackgroundAgentsStatus />}
+          {activeTab === 'home' && (
+            <details className="mx-3 mt-3 rounded-xl border border-cyan-800/40 bg-slate-950/80 text-slate-100">
+              <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-semibold text-cyan-100">
+                Stan systemu
+                <span className="ml-2 text-xs font-normal text-slate-400">
+                  Zasoby serwera, modele Ollama i monitoring agentów
+                </span>
+              </summary>
+              <div className="space-y-3 px-3 pb-3">
+                <SystemResourceMeters />
+                <OllamaModelManager />
+                <BackgroundAgentsStatus />
+              </div>
+            </details>
+          )}
 
           {activeTab === 'home' && (
             <BastillaDashboard

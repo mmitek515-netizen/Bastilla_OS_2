@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DataStore, OPERATOR_NAME, SYS_VERSION, generateTextReport, generatePythonMonolith } from '../kernel/svlKernel';
-import { Terminal, Copy, Download, RefreshCw, ShieldCheck, Cpu, Clock, Check, ExternalLink } from 'lucide-react';
+import { Terminal, Copy, Download, RefreshCw, ShieldCheck, Cpu, Clock, Check, ExternalLink, ChevronDown } from 'lucide-react';
 
 interface HeaderProps {
   dataStore: DataStore;
@@ -17,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [currentTime, setCurrentTime] = useState<string>('');
   const [actionError, setActionError] = useState('');
+  const actionMenuRef = useRef<HTMLDetailsElement>(null);
 
   const rawVersion =
     dataStore.config?.sys_version ||
@@ -32,6 +33,16 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const compactLayout = window.matchMedia('(max-width: 639px)');
+    const updateActionMenu = () => {
+      if (actionMenuRef.current) actionMenuRef.current.open = !compactLayout.matches;
+    };
+    updateActionMenu();
+    compactLayout.addEventListener('change', updateActionMenu);
+    return () => compactLayout.removeEventListener('change', updateActionMenu);
   }, []);
 
   const handleCopyMonolith = async () => {
@@ -172,71 +183,79 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
               </button>
             )}
 
-            {onUnclog && (
-              <button
-                onClick={onUnclog}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-700/60 transition cursor-pointer font-bold shadow-[0_0_8px_rgba(245,158,11,0.3)]"
-                title="Odblokuj system, oczyść bufor i zsynchronizuj stan"
-              >
-                <span>Odblokuj</span>
-              </button>
-            )}
+            <details ref={actionMenuRef} className="group relative">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3 text-xs font-medium text-slate-200 sm:hidden">
+                Więcej akcji
+                <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="absolute right-0 top-full z-50 mt-2 flex w-max max-w-[calc(100vw-1rem)] flex-col items-stretch gap-1 rounded-xl border border-slate-700 bg-slate-950 p-2 shadow-xl sm:static sm:mt-0 sm:w-auto sm:max-w-none sm:flex-row sm:items-center sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
+                {onUnclog && (
+                  <button
+                    onClick={onUnclog}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-950/80 hover:bg-amber-900 text-amber-200 border border-amber-700/60 transition cursor-pointer font-bold shadow-[0_0_8px_rgba(245,158,11,0.3)]"
+                    title="Odblokuj system, oczyść bufor i zsynchronizuj stan"
+                  >
+                    <span>Odblokuj</span>
+                  </button>
+                )}
 
-            {onRestoreBackup && (
-              <button
-                onClick={onRestoreBackup}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-700/60 transition cursor-pointer font-bold shadow-[0_0_8px_rgba(168,85,247,0.3)]"
-                title="Wdróż backup z pierwszej wersji (v1.0.0-Legacy)"
-              >
-                <span>Wdróż Backup (v1.0)</span>
-              </button>
-            )}
+                {onRestoreBackup && (
+                  <button
+                    onClick={onRestoreBackup}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-700/60 transition cursor-pointer font-bold shadow-[0_0_8px_rgba(168,85,247,0.3)]"
+                    title="Wdróż backup z pierwszej wersji (v1.0.0-Legacy)"
+                  >
+                    <span>Wdróż Backup (v1.0)</span>
+                  </button>
+                )}
 
-            <button
-              onClick={handleCopyMonolith}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
-              title="Kopiuj zrzut kodu Pythona z tagami DATA_STORE"
-            >
-              {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-300" />}
-              <span>{copied ? 'Skopiowano!' : 'Kopiuj .py'}</span>
-            </button>
+                <button
+                  onClick={handleCopyMonolith}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+                  title="Kopiuj zrzut kodu Pythona z tagami DATA_STORE"
+                >
+                  {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-300" />}
+                  <span>{copied ? 'Skopiowano!' : 'Kopiuj .py'}</span>
+                </button>
 
-            <button
-              onClick={handleDownloadMonolith}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
-              title="Pobierz plik SVL Kernel .py"
-            >
-              <Download className="w-3 h-3 text-slate-300" />
-              <span className="hidden md:inline">Zrzut</span>
-            </button>
+                <button
+                  onClick={handleDownloadMonolith}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+                  title="Pobierz plik SVL Kernel .py"
+                >
+                  <Download className="w-3 h-3 text-slate-300" />
+                  <span className="hidden md:inline">Zrzut</span>
+                </button>
 
-            <button
-              onClick={onShowReport}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-800/40 transition cursor-pointer"
-              title="Wyświetl raport tekstowy ASCII"
-            >
-              <Terminal className="w-3 h-3" />
-              <span>Raport</span>
-            </button>
+                <button
+                  onClick={onShowReport}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-800/40 transition cursor-pointer"
+                  title="Wyświetl raport tekstowy ASCII"
+                >
+                  <Terminal className="w-3 h-3" />
+                  <span>Raport</span>
+                </button>
 
-            <a
-              href="/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-blue-950/80 hover:bg-blue-900 text-blue-200 border border-blue-700/60 transition cursor-pointer font-bold shadow-[0_0_8px_rgba(59,130,246,0.3)]"
-              title="Otwórz pełną wersję aplikacji w nowej karcie"
-            >
-              <ExternalLink className="w-3 h-3 text-blue-300" />
-              <span className="hidden sm:inline">Pełna Wersja</span>
-            </a>
+                <a
+                  href="/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-blue-950/80 hover:bg-blue-900 text-blue-200 border border-blue-700/60 transition cursor-pointer font-bold shadow-[0_0_8px_rgba(59,130,246,0.3)]"
+                  title="Otwórz pełną wersję aplikacji w nowej karcie"
+                >
+                  <ExternalLink className="w-3 h-3 text-blue-300" />
+                  <span className="hidden sm:inline">Pełna Wersja</span>
+                </a>
 
-            <button
-              onClick={onReset}
-              className="p-1.5 rounded hover:bg-red-950/40 text-slate-400 hover:text-red-400 border border-transparent hover:border-red-900/40 transition cursor-pointer"
-              title="Przywróć stan bazowy Monolitu"
-            >
-              <RefreshCw className="w-3 h-3" />
-            </button>
+                <button
+                  onClick={onReset}
+                  className="p-1.5 rounded hover:bg-red-950/40 text-slate-400 hover:text-red-400 border border-transparent hover:border-red-900/40 transition cursor-pointer"
+                  title="Przywróć stan bazowy Monolitu"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -244,4 +263,3 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
     </header>
   );
 };
-
