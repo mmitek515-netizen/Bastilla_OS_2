@@ -21,6 +21,7 @@
     "lint": "tsc --noEmit",
     "start:mcp": "bash scripts/start-bastilla-mcp.sh",
     "mcp:client": "python integrations/mcp/client.py",
+    "sync:status": "node scripts/sync-status.mjs",
     "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
