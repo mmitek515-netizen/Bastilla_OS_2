@@ -4,6 +4,7 @@ import {
   authorizeMcpRequest,
   buildMcpDiagnostics,
   configuredMcpPublicUrl,
+  createMcpRateLimiter,
   MCP_TOOLS,
   mcpTokenConfigured,
 } from '../src/lib/mcpDiagnostics.mjs';
@@ -24,6 +25,18 @@ test('MCP bearer authorization fails closed and uses a distinct configured token
 test('legacy MCP endpoint exposes only a read-only status tool', () => {
   assert.deepEqual(MCP_TOOLS.map((tool) => tool.name), ['kernel_status']);
   assert.equal(MCP_TOOLS[0].inputSchema.properties.command, undefined);
+});
+
+test('legacy MCP request limits enforce window resets and bounded client state', () => {
+  let time = 0;
+  const limiter = createMcpRateLimiter({ limit: 2, windowMs: 1000, maxClients: 2, now: () => time });
+  assert.equal(limiter('client-a').allowed, true);
+  assert.equal(limiter('client-a').allowed, true);
+  assert.deepEqual(limiter('client-a'), { allowed: false, retryAfterSeconds: 1 });
+  assert.equal(limiter('client-b').allowed, true);
+  assert.deepEqual(limiter('client-c'), { allowed: false, retryAfterSeconds: 1 });
+  time = 1000;
+  assert.equal(limiter('client-c').allowed, true);
 });
 
 test('only a public HTTPS MCP URL can be reported as configured', () => {
