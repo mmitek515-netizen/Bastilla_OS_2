@@ -178,6 +178,10 @@ export const Navigation: React.FC<NavigationProps> = ({
       badge: 'GIT'
     }
   ];
+  // All routes remain intact; only the visible navigation is reduced.
+  const primaryTabs = tabs.filter((tab) => tab.id === 'terminal');
+  const secondaryTabs = tabs.filter((tab) => tab.id !== 'terminal');
+  const isSecondaryActive = activeTab !== 'terminal';
   const mobileLabels: Partial<Record<TabId, string>> = { home: 'Pulpit', comms: 'Czat', terminal: 'Terminal', apps: 'Aplikacje', integrations: 'Integracje' };
 
   return (
@@ -186,7 +190,7 @@ export const Navigation: React.FC<NavigationProps> = ({
         <div className="hidden px-3 pb-2 pt-1 text-[9px] font-mono font-bold tracking-[0.18em] text-blue-200/40 lg:block">
           OBSZAR ROBOCZY
         </div>
-        {tabs.map((tab) => {
+        {primaryTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
@@ -197,7 +201,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
               onClick={() => onSelectTab(tab.id)}
-              className={`group relative min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center transition-all duration-200 lg:min-h-11 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-left ${['home', 'comms', 'terminal', 'apps', 'integrations'].includes(tab.id) ? 'flex' : 'hidden lg:flex'} ${
+              className={`group relative min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center transition-all duration-200 lg:min-h-11 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-left ${tab.id === 'terminal' ? 'flex' : 'hidden lg:flex'} ${
                 isActive
                   ? 'border border-cyan-300/15 bg-cyan-950/50 text-cyan-100 shadow-[inset_2px_0_0_#67e8f9,0_4px_18px_rgba(8,145,178,0.08)]'
                   : 'border border-transparent text-slate-400 hover:bg-blue-950/50 hover:text-blue-100'
@@ -212,17 +216,17 @@ export const Navigation: React.FC<NavigationProps> = ({
             </button>
           );
         })}
-        <label className="relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl bg-slate-900 px-1 py-2 text-cyan-200 lg:hidden">
-          <Plug className="h-4 w-4" aria-hidden="true" />
-          <span className="w-full truncate text-center text-[10px]">Więcej</span>
+        <label className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 lg:mt-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 ${isSecondaryActive ? 'bg-cyan-950/50 text-cyan-100' : 'bg-slate-900 text-cyan-200'}`}>
+          <Plug className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="w-full truncate text-center text-[10px] lg:text-left lg:text-[11px]">Więcej</span>
           <select
             aria-label="Pozostałe moduły BastillaOS"
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            value={['home', 'comms', 'terminal', 'apps'].includes(activeTab) ? '' : activeTab}
+            value={isSecondaryActive ? activeTab : ''}
             onChange={(event) => { if (event.target.value) onSelectTab(event.target.value as TabId); }}
           >
             <option value="" disabled>Wybierz moduł</option>
-            {tabs.filter((tab) => !['home', 'comms', 'terminal', 'apps'].includes(tab.id)).map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+            {secondaryTabs.map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
           </select>
         </label>
       </div>
