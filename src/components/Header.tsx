@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DataStore, OPERATOR_NAME, SYS_VERSION, generateTextReport, generatePythonMonolith } from '../kernel/svlKernel';
-import { Terminal, Copy, Download, RefreshCw, ShieldCheck, Cpu, Clock, Check, ExternalLink } from 'lucide-react';
+import { Terminal, Copy, Download, RefreshCw, Cpu, Clock, Check, ExternalLink } from 'lucide-react';
 
 interface HeaderProps {
   dataStore: DataStore;
@@ -23,6 +23,9 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
     dataStore.update_history?.[dataStore.update_history.length - 1]?.wersja ||
     SYS_VERSION;
   const formattedVersion = String(rawVersion).startsWith('v') ? String(rawVersion) : `v${rawVersion}`;
+  const buildVersion = import.meta.env.VITE_BUILD_VERSION || 'unknown';
+  const buildCommit = import.meta.env.VITE_BUILD_COMMIT || 'unknown';
+  const displayedCommit = buildCommit === 'unknown' ? 'SHA unavailable' : buildCommit.slice(0, 12);
 
   useEffect(() => {
     const updateTime = () => {
@@ -77,20 +80,19 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
       <div className="mx-auto flex w-full min-w-0 flex-wrap items-center justify-between gap-2 px-2 py-2 text-xs sm:gap-3 sm:px-4">
         {/* Brand & Kernel identity */}
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_10px_#10b981]" />
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="whitespace-nowrap bg-gradient-to-r from-blue-100 via-cyan-200 to-blue-300 bg-clip-text font-mono text-sm font-extrabold tracking-[0.16em] text-transparent">
+              BASTILLA OS 2
             </span>
-            <span             className="bg-gradient-to-r from-blue-100 via-cyan-200 to-blue-300 bg-clip-text font-mono text-sm font-extrabold tracking-[0.16em] text-transparent">
-            BASTILLA OS
+            <span
+              title={`Build version ${buildVersion}; commit SHA ${buildCommit}`}
+              aria-label={`Build version ${buildVersion}; commit SHA ${buildCommit}`}
+              className="max-w-48 truncate rounded border border-cyan-200/15 bg-cyan-950/50 px-2 py-0.5 font-mono text-[9px] font-bold text-cyan-100/75 sm:max-w-none"
+            >
+              BUILD {buildVersion} · {displayedCommit}
             </span>
-            <span title={formattedVersion} className="max-w-36 truncate rounded border border-blue-200/15 bg-blue-950/50 px-2 py-0.5 font-mono text-[10px] font-bold text-blue-100/75 sm:max-w-none">
-              {formattedVersion}
-            </span>
-            <span className="hidden items-center gap-1 rounded border border-emerald-400/15 bg-emerald-950/30 px-2 py-0.5 font-mono text-[9px] text-emerald-300 lg:inline-flex">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            DEBIAN · SVL READY
+            <span title={`SVL kernel ${formattedVersion}`} className="max-w-36 truncate rounded border border-blue-200/15 bg-blue-950/50 px-2 py-0.5 font-mono text-[10px] font-bold text-blue-100/75 sm:max-w-none">
+              SVL {formattedVersion}
             </span>
           </div>
 
@@ -111,37 +113,32 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
         <div className="header-actions flex w-full min-w-0 flex-wrap items-center gap-2 text-[11px] font-mono text-slate-400 sm:w-auto sm:max-w-full">
           {dataStore.config?.root_privileges && (
             <div className="hidden items-center gap-1.5 bg-red-950/80 border border-red-500/60 px-2.5 py-1 rounded text-red-300 font-bold shadow-[0_0_12px_rgba(239,68,68,0.3)] sm:flex">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span>ROOT: RING-0 (TRIADA)</span>
+              <span>KONFIG. ROOT PRIVILEGES</span>
             </div>
           )}
 
-          {/* Commander Alex Badge */}
           <div className="hidden items-center gap-1.5 bg-emerald-950/80 border border-emerald-500/50 px-2.5 py-1 rounded text-emerald-300 font-bold shadow-[0_0_10px_rgba(16,185,129,0.25)] sm:flex">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>INFRA: DOWÓDCA ALEX</span>
+            <span>PROFIL: DOWÓDCA ALEX</span>
           </div>
 
           <div className="hidden xl:flex items-center gap-1.5 bg-cyan-950/70 border border-cyan-500/40 px-2 py-1 rounded text-cyan-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-            <span>ASTYRIA AUTO-REPAIR: ON</span>
+            <span>PROFIL: ASTYRIA</span>
           </div>
 
           <div className="hidden items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2.5 py-1 rounded backdrop-blur md:flex">
             <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="text-slate-500">RDZEŃ:</span>
+            <span className="text-slate-500">KONFIG. RDZENIA:</span>
             <span className="text-slate-200 font-medium">{dataStore.config?.neural_engine || 'SVL-Sovereign-Neural-Core-v8.0'}</span>
           </div>
 
           <div className="hidden items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2.5 py-1 rounded backdrop-blur lg:flex">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-slate-500">WARSTWA FIKCJI:</span>
-            <span className="text-emerald-400 font-medium">DEZAKTYWOWANA</span>
+            <span className="text-slate-500">TYP:</span>
+            <span className="text-slate-200 font-medium">APLIKACJA WEB</span>
           </div>
 
           <div className="flex items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2.5 py-1 rounded backdrop-blur">
             <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span className="text-amber-300">{currentTime || 'CZAS SYNCHR.'}</span>
+            <span className="text-amber-300">{currentTime || '--:--:--'}</span>
           </div>
 
           {/* Quick Action buttons */}
@@ -244,4 +241,3 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
     </header>
   );
 };
-
