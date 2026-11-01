@@ -628,7 +628,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
 
         </div>
 
-        <form onSubmit={handleSendMessage} className="relative w-full shrink-0 border-t border-cyan-500/20 bg-slate-950/90 p-2 backdrop-blur-md sm:p-2.5">
+        <form onSubmit={handleSendMessage} className="sticky bottom-0 z-20 mt-auto w-full shrink-0 border-t border-cyan-500/20 bg-slate-950/95 p-2 backdrop-blur-md sm:p-2.5">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
           {chatAttachments.length > 0 && (
             <ul aria-label="Załączone pliki" className="mb-2 flex flex-wrap gap-1.5">
@@ -663,7 +663,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               maxLength={20_500}
               rows={2}
               disabled={isLoading}
-              placeholder="Wiadomość do agentów…"
+              placeholder="Napisz wiadomość…"
               className="w-full resize-y rounded-lg border border-slate-700/70 bg-slate-900/90 px-3 py-2.5 pr-8 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 disabled:opacity-50 sm:rounded-xl sm:px-4"
             />
             {messageText && !isLoading && (
