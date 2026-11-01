@@ -36,8 +36,8 @@ export const SYSTEM_AGENTS: Record<string, AgentProfile> = {
     textColor: "text-amber-400",
     accentHex: "#f59e0b",
   },
-  si_1: {
-    id: "si_1",
+  Aria: {
+    id: "Aria",
     name: "Aria",
     avatarColor: "bg-rose-500/20 text-rose-400 border-rose-500/30",
     borderColor: "border-rose-500/30",
