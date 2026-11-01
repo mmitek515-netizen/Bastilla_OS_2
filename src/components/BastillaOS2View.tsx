@@ -59,6 +59,7 @@ export const BastillaOS2View: React.FC = () => {
   const [taskTitle, setTaskTitle] = useState('Analiza zadania przez agenta AI');
   const [taskDescription, setTaskDescription] = useState('Opisz konkretnie, co agent ma przeanalizować lub przygotować.');
   const [targetAppId, setTargetAppId] = useState('bastilla_os_2');
+  const [taskToken, setTaskToken] = useState('');
   const [runError, setRunError] = useState('');
 
   const fetchTasks = useCallback(async () => {
@@ -91,7 +92,10 @@ export const BastillaOS2View: React.FC = () => {
     try {
       const res = await fetch('/api/agent-tasks/run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(taskToken.trim() ? { Authorization: `Bearer ${taskToken.trim()}` } : {}),
+        },
         body: JSON.stringify({
           agent,
           title: taskTitle,
@@ -120,7 +124,10 @@ export const BastillaOS2View: React.FC = () => {
     try {
       const res = await fetch('/api/agent-tasks/cancel', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(taskToken.trim() ? { Authorization: `Bearer ${taskToken.trim()}` } : {}),
+        },
         body: JSON.stringify({ id }),
       });
       if (res.ok) {
@@ -432,6 +439,19 @@ export const BastillaOS2View: React.FC = () => {
             </div>
 
             <form onSubmit={handleRunTask} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium text-[#594E3F] mb-1" htmlFor="agent-task-token">Token operacji agentów</label>
+                <input
+                  id="agent-task-token"
+                  type="password"
+                  autoComplete="off"
+                  value={taskToken}
+                  onChange={(e) => setTaskToken(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-lg border border-[#D9C38B] bg-[#FAF7F0] text-[#1A1612]"
+                />
+              </div>
+
               <div>
                 <label className="block font-medium text-[#594E3F] mb-1">Wykonawca w Triadzie</label>
                 <select

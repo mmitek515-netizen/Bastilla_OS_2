@@ -6337,6 +6337,19 @@ app.post('/api/kernel/agent', (_req, res) => {
 // --- AGENT TASK REGISTRY (REAL EXECUTOR & ARTIFACT ENFORCEMENT) ---
 // ============================================================================
 
+const agentTasksToken = (process.env.BASTILLA_AGENT_TASKS_TOKEN || '').trim();
+function authorizeAgentTasks(req: express.Request, res: express.Response): boolean {
+  if (!agentTasksToken) {
+    res.status(503).json({ success: false, error: 'Ustaw BASTILLA_AGENT_TASKS_TOKEN, aby włączyć operacje na zadaniach agentów.' });
+    return false;
+  }
+  if (req.get('Authorization') !== `Bearer ${agentTasksToken}`) {
+    res.status(401).json({ success: false, error: 'Brak poprawnego tokenu do zadań agentów.' });
+    return false;
+  }
+  return true;
+}
+
 app.get('/api/agent-tasks', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   return res.json({
@@ -6347,6 +6360,7 @@ app.get('/api/agent-tasks', (_req, res) => {
 });
 
 app.post('/api/agent-tasks/run', async (req, res) => {
+  if (!authorizeAgentTasks(req, res)) return;
   try {
     const { agent, title, description, executionType, actionType, targetAppId } = req.body;
     if (!agent || !title || !description) {
@@ -6392,6 +6406,7 @@ app.post('/api/agent-tasks/run', async (req, res) => {
 });
 
 app.post('/api/agent-tasks/cancel', (req, res) => {
+  if (!authorizeAgentTasks(req, res)) return;
   const { id } = req.body;
   if (!id) {
     return res.status(400).json({ success: false, error: 'Brak identyfikatora zadania.' });
