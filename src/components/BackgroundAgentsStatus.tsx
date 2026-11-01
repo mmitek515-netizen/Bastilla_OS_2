@@ -4,6 +4,7 @@ import {
   AGENT_STATUS_LABELS,
   AGENT_STATUS_NAMES,
   AGENT_STATUS_STALE_AFTER_MS,
+  isAgentStatusResponse,
 } from '../lib/agentStatusContract.mjs';
 
 type AgentName = typeof AGENT_STATUS_NAMES[number];
@@ -28,22 +29,6 @@ type StatusResponse = {
   agents: Record<AgentName, AgentStatus>;
   note: string;
 };
-
-function validStatusResponse(result: StatusResponse): boolean {
-  return Boolean(result && result.success === true
-    && result.schemaVersion === 1
-    && Number.isFinite(Date.parse(result.observedAt))
-    && result.agents
-    && AGENT_STATUS_NAMES.every((name) => {
-      const agent = result.agents[name];
-      return agent
-        && Object.hasOwn(AGENT_STATUS_LABELS, agent.status)
-        && (agent.status !== 'active'
-          || (Number.isFinite(Date.parse(agent.lastEventAt || ''))
-            && typeof agent.evidence?.source === 'string'
-            && typeof agent.evidence?.taskId === 'string'));
-    }));
-}
 
 const stateStyles: Record<AgentState, string> = {
   active: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200',
@@ -79,7 +64,7 @@ export function BackgroundAgentsStatus() {
       });
       if (!response.ok) throw new Error(`Błąd API (HTTP ${response.status})`);
       const result = await response.json() as StatusResponse;
-      if (!validStatusResponse(result)) {
+      if (!isAgentStatusResponse(result)) {
         throw new Error('Nieprawidłowa odpowiedź API');
       }
       setData(result);

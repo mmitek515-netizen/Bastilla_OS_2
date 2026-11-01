@@ -4,7 +4,11 @@ import {
   createAgentStatusSnapshot,
   registerAgentStatus,
 } from '../src/lib/agentStatus.mjs';
-import { AGENT_STATUS_NAMES, AGENT_STATUS_LABELS } from '../src/lib/agentStatusContract.mjs';
+import {
+  AGENT_STATUS_NAMES,
+  AGENT_STATUS_LABELS,
+  isAgentStatusResponse,
+} from '../src/lib/agentStatusContract.mjs';
 
 const token = 'agent-status-test-token-0123456789';
 
@@ -36,7 +40,7 @@ test('agent status contract reports only live executors as active with source an
     getAll: () => [
       { id: 'live-aria', agent: 'Aria', status: 'running', startedAt: '2026-11-01T11:59:00Z', logs: ['[2026-11-01T11:59:00Z] started'] },
       { id: 'stale-alex', agent: 'Alex', status: 'running', startedAt: '2026-11-01T11:59:00Z', logs: [] },
-      { id: 'failed-aurelius', agent: 'Aurelius', status: 'failed', completedAt: '2026-11-01T11:58:00Z', logs: [] },
+      { id: 'failed-aurelius', agent: 'Aurelius', status: 'failed', executionOrigin: 'runtime', completedAt: '2026-11-01T11:58:00Z', logs: [] },
       { id: 'done-astyria', agent: 'Astyria', status: 'completed', completedAt: '2026-11-01T11:58:00Z', logs: [] },
     ],
     isExecutorRunning: (id) => id === 'live-aria',
@@ -53,6 +57,33 @@ test('agent status contract reports only live executors as active with source an
   assert.deepEqual(Object.keys(AGENT_STATUS_LABELS).sort(), ['active', 'blocked', 'error', 'unverified', 'waiting']);
   assert.equal(AGENT_STATUS_LABELS.active, 'Aktywny');
   assert.equal(AGENT_STATUS_LABELS.unverified, 'Niezweryfikowany');
+});
+
+test('UI contract rejects malformed active states without timestamped evidence', () => {
+  const agents = Object.fromEntries(AGENT_STATUS_NAMES.map((name) => [name, {
+    status: 'unverified',
+    lastEventAt: null,
+    observedAt: '2026-11-01T12:00:00.000Z',
+    evidence: null,
+  }]));
+  const response = {
+    success: true,
+    schemaVersion: 1,
+    observedAt: '2026-11-01T12:00:00.000Z',
+    agents,
+  };
+  assert.equal(isAgentStatusResponse(response), true);
+  assert.equal(isAgentStatusResponse({
+    ...response,
+    agents: {
+      ...agents,
+      Alex: { ...agents.Alex, status: 'active' },
+    },
+  }), false);
+  assert.equal(isAgentStatusResponse({
+    ...response,
+    agents: { ...agents, Aria: { ...agents.Aria, status: 'online' } },
+  }), false);
 });
 
 test('old records and persisted running labels remain unverified', () => {
@@ -72,10 +103,26 @@ test('old records and persisted running labels remain unverified', () => {
   assert.equal(snapshot.agents.Aria.evidence.taskStatus, 'failed');
 });
 
+test('seeded artifact failures are not presented as agent runtime errors', () => {
+  const snapshot = createAgentStatusSnapshot({
+    getAll: () => [{
+      id: 'seed-task-with-missing-artifact',
+      agent: 'Aurelius',
+      status: 'failed',
+      completedAt: '2026-11-01T11:59:00Z',
+      logs: [],
+    }],
+    isExecutorRunning: () => false,
+  }, new Date('2026-11-01T12:00:00.000Z'));
+
+  assert.equal(snapshot.agents.Aurelius.status, 'unverified');
+});
+
 test('agent status endpoint fails closed without a configured token or valid bearer', () => {
   const disabled = harness({ env: {} }).request('Bearer ' + token);
   assert.equal(disabled.code, 503);
   assert.equal(disabled.headers['Cache-Control'], 'no-store');
+  assert.equal(harness({ env: { BASTILLA_AGENT_STATUS_TOKEN: 'short' } }).request().code, 503);
 
   const endpoint = harness();
   const invalidBearer = 'Bearer ' + 'invalid-token';

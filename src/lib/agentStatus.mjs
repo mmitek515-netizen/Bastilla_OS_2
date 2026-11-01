@@ -51,7 +51,9 @@ export function createAgentStatusSnapshot(registry, now = new Date()) {
     } : null;
 
     return [name, {
-      status: recent && latestTask.status === 'failed' ? 'error' : 'unverified',
+      status: recent && latestTask.executionOrigin === 'runtime' && latestTask.status === 'failed'
+        ? 'error'
+        : 'unverified',
       lastEventAt,
       observedAt,
       evidence,

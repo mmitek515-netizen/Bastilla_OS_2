@@ -13,6 +13,7 @@ export interface AgentTask {
   title: string;
   description: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
+  executionOrigin?: 'runtime';
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -277,6 +278,7 @@ class AgentTaskRegistry {
     title: string;
     description: string;
     actionType: string;
+    executionOrigin?: 'runtime';
     payload?: Record<string, any>;
     aiExecutor?: (
       task: Pick<AgentTask, 'agent' | 'title' | 'description'>,
@@ -292,6 +294,7 @@ class AgentTaskRegistry {
       title: params.title,
       description: params.description,
       status: 'queued',
+      ...(params.executionOrigin ? { executionOrigin: params.executionOrigin } : {}),
       createdAt: now,
       logs: [`[${now}] Zadanie zarejestrowane w kolejce.`],
     };

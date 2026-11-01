@@ -39,6 +39,6 @@ Raport nie określa procentu ukończenia całego systemu.
 
 - `GET /api/agents/status` wymaga `BASTILLA_AGENT_STATUS_TOKEN` (co najmniej 32 znaki) i Bearer; odpowiedzi nie są buforowane. Token nie znajduje się w kodzie UI ani `localStorage`; operator wprowadza go w panelu, a UI trzyma go tylko w pamięci komponentu.
 - Źródłem dowodu aktywności jest bieżący executor `AgentTaskRegistry` w procesie serwera oraz czas ostatniego zdarzenia rejestru. Sam zapis `running` na dysku, ukończone zadanie, profil agenta, dostępność Ollama ani przypisany Issue nie potwierdzają procesu aktywnego.
-- Dane API wygasają po 45 sekundach. Ostatnie błędy zadań są widoczne jako błąd maksymalnie przez 24 godziny; starsze lub brakujące dane są niezweryfikowane.
+- Dane API wygasają po 45 sekundach. Ostatnie błędy zadań utworzonych przez rzeczywisty executor są widoczne jako błąd maksymalnie przez 24 godziny; błędy zadań startowych bez pochodzenia wykonawczego, starsze lub brakujące dane są niezweryfikowane.
 - Obecny rejestr nie dostarcza wiarygodnego stanu oczekiwania ani zablokowania i nie raportuje osobno GitHub Issues/PR/Actions, heartbeatów zewnętrznych wykonawców ani inferencji modelu. Te stany nie są zgadywane; pozostają niezweryfikowane, dopóki nie pojawi się jawna telemetria.
 - Lokalny serwer/testy potwierdzają wyłącznie funkcję tego endpointu i rejestru. Nie stanowią dowodu uruchomienia zewnętrznych agentów ani połączenia z ChatGPT.

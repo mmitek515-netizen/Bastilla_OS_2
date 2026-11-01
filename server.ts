@@ -6387,6 +6387,7 @@ app.post('/api/agent-tasks/run', async (req, res) => {
       title: title.trim(),
       description: description.trim(),
       actionType: requestedAction,
+      executionOrigin: 'runtime',
       payload: { targetAppId: targetAppId || 'bastilla_os_2' },
       ...(requestedAction === 'ai_task' ? {
         aiExecutor: async (task, signal) => {
@@ -6632,4 +6633,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
