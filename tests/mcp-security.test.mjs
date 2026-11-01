@@ -5,6 +5,10 @@ import { readFileSync } from 'node:fs';
 const server = readFileSync(new URL('../server.ts', import.meta.url), 'utf8');
 const start = server.indexOf("app.all(['/api/mcp', '/mcp']");
 const handler = start < 0 ? '' : server.slice(start, start + 5500);
+const sseStart = server.indexOf("app.get('/api/mcp/sse'");
+const sse = sseStart < 0 ? '' : server.slice(sseStart, sseStart + 500);
+const authStart = server.indexOf('function authorizeMcp(');
+const auth = authStart < 0 ? '' : server.slice(authStart, authStart + 1150);
 
 test('MCP JSON-RPC handler exists and supports handshake and discovery', () => {
   assert.ok(start >= 0, 'MCP endpoint missing');
@@ -13,11 +17,23 @@ test('MCP JSON-RPC handler exists and supports handshake and discovery', () => {
   }
 });
 
-test('MCP tool execution must have authentication gate', () => {
-  assert.ok(start >= 0, 'MCP endpoint missing');
-  const toolCall = handler.indexOf("case 'tools/call'");
-  assert.ok(toolCall >= 0, 'tools/call missing');
-  const beforeToolCall = handler.slice(0, toolCall);
-  assert.match(beforeToolCall, /(?:authorization|authenticate|requireAuth|verifyToken|authMiddleware)/i,
-    'SECURITY BLOCKER: MCP tool execution has no visible authorization check before tools/call. Do not expose publicly.');
+test('MCP RPC and SSE must both enforce authorization before processing', () => {
+  assert.ok(start >= 0 && sseStart >= 0, 'MCP endpoint missing');
+  assert.match(handler.slice(0, 350), /if \(!authorizeMcp\(req, res\)\) return;/);
+  assert.match(sse.slice(0, 220), /if \(!authorizeMcp\(req, res\)\) return;/);
 });
+
+test('MCP must fail closed without a dedicated sufficiently long token', () => {
+  assert.ok(authStart >= 0, 'MCP authorization helper missing');
+  assert.match(server, /BASTILLA_MCP_TOKEN/);
+  assert.match(auth, /mcpAccessToken\.length < 32/);
+  assert.match(auth, /status\(503\)/);
+  assert.match(auth, /status\(401\)/);
+  assert.match(auth, /timingSafeEqual/);
+});
+
+test('MCP RPC must not permit wildcard CORS origin', () => {
+  assert.doesNotMatch(handler.slice(0, 600), /Access-Control-Allow-Origin.*\*/);
+});
+
+// These source-level tests are regression guards, not HTTP or external-client proof.
