@@ -174,3 +174,8 @@ input, select, textarea {
 }
 
 
+
+/* Keep the chat composer visible while the conversation scrolls. */
+#triad-chat-message { max-height: 8rem; resize: none; }
+form:has(#triad-chat-message) { position: sticky; bottom: 0; z-index: 20; margin-top: auto; flex-shrink: 0; padding-bottom: max(.5rem, env(safe-area-inset-bottom)); }
+main:has(#triad-chat-message) { min-height: 0 !important; }
