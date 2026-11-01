@@ -22,3 +22,5 @@ jobs:
       - run: npm ci
       - name: MCP authentication and protocol regression
         run: node --test tests/mcp-security.test.mjs
+      - name: Verify project
+        run: npm run verify
