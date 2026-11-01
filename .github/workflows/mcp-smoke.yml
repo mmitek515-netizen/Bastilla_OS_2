@@ -5,6 +5,7 @@ on:
       - 'server.ts'
       - 'integrations/mcp/**'
       - 'tests/mcp-security.test.mjs'
+      - 'tests/mcp-http.test.mjs'
       - '.github/workflows/mcp-smoke.yml'
   workflow_dispatch:
 permissions:
@@ -22,5 +23,7 @@ jobs:
       - run: npm ci
       - name: MCP authentication and protocol regression
         run: node --test tests/mcp-security.test.mjs
+      - name: Live MCP HTTP smoke
+        run: node --test tests/mcp-http.test.mjs
       - name: Verify project
         run: npm run verify
