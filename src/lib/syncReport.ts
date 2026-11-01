@@ -22,5 +22,5 @@ export function formatSyncReport(checks: SyncCheck[]): string {
     `SYNC — potwierdzone odczyty: ${confirmed}/${checks.length}; błędy: ${failed}; bez potwierdzenia: ${checks.length - confirmed - failed}.`,
     ...checks.map(c => `• ${c.domain}: ${c.state === 'confirmed' ? 'ODCZYT OK' : c.state === 'failed' ? 'BŁĄD' : 'NIEPOTWIERDZONE'} — ${c.detail}`),
     'Polecenie nie wykonuje automatycznego git push, migracji bazy ani wdrożenia produkcyjnego.',
-  ].join('\\n');
+  ].join('\n');
 }
