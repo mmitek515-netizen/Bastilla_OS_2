@@ -66,3 +66,5 @@ Raport nie określa procentu ukończenia całego systemu.
   produktu i build ID bez poziomego overflow. Podgląd nie uruchamiał backendu;
   nie jest to dowód działania API, modelu ani VM. Zmiany nie modyfikują API.
 - Skan zmienionych plików nie znalazł sekretów.
+- [Zrzut build ID](evidence/build-identity.png) pokazuje wersję i skrócony SHA
+  z czystego kodu UI commit `b6a3f1992c683836b2c81868e35873e44379ed02`.
