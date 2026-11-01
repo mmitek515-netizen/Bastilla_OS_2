@@ -9,6 +9,7 @@ async def main():
     async with streamablehttp_client(os.environ.get("BASTILLA_MCP_URL", "http://127.0.0.1:8000/mcp")) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
+            await session.send_ping()
             tools = await session.list_tools()
             names = {tool.name for tool in tools.tools}
             expected = {"ollama_status", "agents_status", "vm_status"}
@@ -55,13 +56,9 @@ async def main():
                 if not rejected_agent.isError:
                     raise RuntimeError("MCP accepted an unsupported agent role")
     
-            print("MCP handshake, diagnostics, command and agent allowlists: OK")
+            print("MCP handshake, ping, diagnostics, command and agent allowlists: OK")
             print("Tools:", ", ".join(sorted(names)))
-            print("Ollama diagnostic:", result)
-            print("Agents monitoring diagnostic:", agents_result)
-            print("VM diagnostic:", vm_result)
-            print("Agent diagnostic:", agent_result)
-            print("Note: tool responses do not independently prove an LLM model is online.")
+            print("Ollama, agent, VM and command checks: completed; see local service diagnostics for details.")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -1,5 +1,6 @@
 import express from 'express';
 import { registerGptActions } from './src/lib/gptActions.mjs';
+import { authorizeMcpRequest, buildMcpDiagnostics, MCP_TOOLS } from './src/lib/mcpDiagnostics.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
@@ -5974,108 +5975,8 @@ app.post('/api/triad/message', async (req, res) => {
 });
 
 // --- MODEL CONTEXT PROTOCOL (MCP) & CHATGPT ACTION BRIDGE ---
-interface McpToolDefinition {
-  name: string;
-  description: string;
-  inputSchema: {
-    type: 'object';
-    properties: Record<string, any>;
-    required?: string[];
-  };
-}
-
-const MCP_TOOLS: McpToolDefinition[] = [
-  {
-    name: 'astyria_command',
-    description: 'Wykonaj polecenie lub zapytanie przez agenta Astyria (hipernadzorca BastillaOS / SVL Kernel).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        command: {
-          type: 'string',
-          description: 'Treść dyspozycji lub zapytania dla Astyrii.',
-        },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'astyria_mission',
-    description: 'Uruchom autonomiczną misję naprawczą lub diagnostyczną Astyrii (np. repair_all, repair_ollama_and_llm, deep_scan).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['repair_all', 'repair_ollama_and_llm', 'deep_scan', 'vm_snapshot_now', 'vm_memory_optimize', 'sync_versions'],
-          description: 'Identyfikator akcji misji Astyrii.',
-        },
-        message: {
-          type: 'string',
-          description: 'Opcjonalna wiadomość lub kontekst zlecenia.',
-        },
-      },
-      required: ['action'],
-    },
-  },
-  {
-    name: 'kernel_status',
-    description: 'Pobierz aktualny stan jądra SVL, metryki RAM/CPU, wersję systemu i status usług.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: 'chat_triad',
-    description: 'Wyślij wiadomość do agentów Triady (Alex, Astyria, Aurelius, Aria).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        message: {
-          type: 'string',
-          description: 'Treść wiadomości do agenta.',
-        },
-        agent: {
-          type: 'string',
-          enum: ['triad', 'Alex', 'Astyria', 'Aurelius', 'si_1'],
-          default: 'Astyria',
-          description: 'Adresat w Triadzie (lub triad dla wszystkich).',
-        },
-      },
-      required: ['message'],
-    },
-  },
-];
-
 async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
   switch (name) {
-    case 'astyria_command': {
-      const command = String(args.command || args.prompt || args.message || 'napraw wszystko');
-      const fetchRes = await fetch(`http://127.0.0.1:${activeServerPort || 3000}/api/astyria/mission`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'process_command', command, userMessage: command }),
-      });
-      const data = await fetchRes.json() as any;
-      return {
-        content: [{ type: 'text', text: data.reply || data.error || 'Polecenie przetworzone przez Astyrię.' }],
-        isError: !data.success && Boolean(data.error),
-      };
-    }
-    case 'astyria_mission': {
-      const action = String(args.action || 'repair_all');
-      const fetchRes = await fetch(`http://127.0.0.1:${activeServerPort || 3000}/api/astyria/mission`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, command: args.message }),
-      });
-      const data = await fetchRes.json() as any;
-      return {
-        content: [{ type: 'text', text: data.reply || data.error || `Misja ${action} zakończona.` }],
-        isError: !data.success && Boolean(data.error),
-      };
-    }
     case 'kernel_status': {
       const state = await getPythonKernelState(true);
       const mem = getVmMemoryTelemetry();
@@ -6085,25 +5986,11 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
         `Pamięć RAM: ${mem.rssMB} MB (${mem.utilizationPercent}%)`,
         `Migawki VM: ${vmTenSystemState.snapshotsCount}`,
         `Wyleczone incydenty: ${healedIncidents.length}`,
-        `Aktywni agenci: Alex, Astyria, Aurelius, Aria`,
+        `Profile agentów (nie status połączenia): Alex, Astyria, Aurelius, Aria`,
       ].join('\n');
       return {
         content: [{ type: 'text', text: statusText }],
         isError: false,
-      };
-    }
-    case 'chat_triad': {
-      const message = String(args.message || '');
-      const agent = String(args.agent || 'Astyria');
-      const fetchRes = await fetch(`http://127.0.0.1:${activeServerPort || 3000}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, target: agent }),
-      });
-      const data = await fetchRes.json() as any;
-      return {
-        content: [{ type: 'text', text: data.reply || data.error || 'Odpowiedź Triady.' }],
-        isError: !data.success && Boolean(data.error),
       };
     }
     default:
@@ -6116,10 +6003,17 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
 
 // MCP SSE endpoint
 app.get('/api/mcp/sse', (req, res) => {
+  const mcpToken = process.env.BASTILLA_MCP_TOKEN || '';
+  if (mcpToken.trim().length < 32) {
+    return res.status(503).json({ error: 'MCP is disabled until BASTILLA_MCP_TOKEN is configured.' });
+  }
+  if (!authorizeMcpRequest(req.get('authorization'), mcpToken)) {
+    res.setHeader('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({ error: 'MCP bearer token required.' });
+  }
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
 
   const sessionId = randomUUID();
   const endpoint = `/api/mcp?sessionId=${sessionId}`;
@@ -6147,95 +6041,67 @@ registerGptActions(app, {
   },
 });
 
-// OpenAPI 3.0 schema for ChatGPT Custom GPT Actions
-app.get('/api/mcp/openapi.json', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  const origin = `${req.protocol}://${req.get('host')}`;
-  return res.json({
-    openapi: '3.0.0',
-    info: {
-      title: 'BastillaOS - Astyria AI Kernel API',
-      description: 'API dla ChatGPT do łączenia z hipernadzorcą Astyria, jądrem SVL oraz narzędziami naprawczymi BastillaOS.',
-      version: '1.0.0',
-    },
-    servers: [{ url: origin }],
-    paths: {
-      '/api/astyria/mission': {
-        post: {
-          summary: 'Wykonaj polecenie lub misję naprawczą przez Astyrię',
-          operationId: 'executeAstyriaMission',
-          requestBody: {
-            required: true,
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    action: {
-                      type: 'string',
-                      enum: ['process_command', 'repair_all', 'repair_ollama_and_llm', 'deep_scan', 'vm_snapshot_now'],
-                      default: 'process_command',
-                    },
-                    command: { type: 'string', description: 'Treść polecenia dla Astyrii' },
-                    userMessage: { type: 'string', description: 'Wiadomość wejściowa' },
-                  },
-                },
-              },
-            },
-          },
-          responses: {
-            '200': {
-              description: 'Odpowiedź Astyrii wraz ze statusem naprawy',
-              content: {
-                'application/json': {
-                  schema: {
-                    type: 'object',
-                    properties: {
-                      success: { type: 'boolean' },
-                      reply: { type: 'string' },
-                      actionTitle: { type: 'string' },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      '/api/system/metrics': {
-        get: {
-          summary: 'Pobierz metryki serwera (CPU, RAM, stan hosta)',
-          operationId: 'getSystemMetrics',
-          responses: {
-            '200': {
-              description: 'Aktualne metryki zasobów sprzętowych',
-            },
-          },
-        },
-      },
-      '/api/kernel/state': {
-        get: {
-          summary: 'Pobierz pełny stan jądra SVL i bazę DATA_STORE',
-          operationId: 'getKernelState',
-          responses: {
-            '200': {
-              description: 'Aktualny stan jądra SVL',
-            },
-          },
-        },
-      },
-    },
-  });
+// Keep the legacy schema URL but point it at the separately authenticated GPT Actions API.
+app.get('/api/mcp/openapi.json', (_req, res) => {
+  return res.redirect(307, '/api/gpt-actions/openapi.json');
 });
 
-// MCP JSON-RPC 2.0 endpoint (ChatGPT / Claude / Cursor MCP)
-app.all(['/api/mcp', '/mcp'], async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Protocol-Version, Mcp-Session-Id');
+let localMcpProbeCache: { checkedAt: number; result: { serverAvailable: boolean; handshakeOk: boolean; error?: string } } | null = null;
+let localMcpProbePending: Promise<{ serverAvailable: boolean; handshakeOk: boolean; error?: string }> | null = null;
 
+app.get('/api/mcp/setup', async (_req, res) => {
+  if (!localMcpProbeCache || Date.now() - localMcpProbeCache.checkedAt > 10000) {
+    if (!localMcpProbePending) {
+      localMcpProbePending = (async () => {
+        try {
+          const mcpPython = path.resolve('.venv-mcp/bin/python');
+          const { stdout } = await execFileAsync(
+            fs.existsSync(mcpPython) ? mcpPython : 'python3',
+            [path.resolve('integrations/mcp/healthcheck.py'), '--json'],
+            {
+              timeout: 9000,
+              maxBuffer: 8 * 1024,
+              env: { ...process.env, BASTILLA_MCP_URL: 'http://127.0.0.1:8000/mcp/' },
+            },
+          );
+          const result = JSON.parse(stdout);
+          return {
+            serverAvailable: result.serverAvailable === true,
+            handshakeOk: result.handshakeOk === true,
+            error: typeof result.error === 'string' ? result.error : undefined,
+          };
+        } catch {
+          return {
+            serverAvailable: false,
+            handshakeOk: false,
+            error: 'Nie udało się sprawdzić lokalnego mostu MCP. Uruchom npm run start:mcp.',
+          };
+        }
+      })().finally(() => {
+        localMcpProbePending = null;
+      });
+    }
+    const result = await localMcpProbePending;
+    localMcpProbeCache = { checkedAt: Date.now(), result };
+  }
+  const localProbe = localMcpProbeCache.result;
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json(buildMcpDiagnostics(process.env, localProbe));
+});
+
+// Legacy authenticated JSON-RPC status endpoint; Streamable HTTP lives in integrations/mcp.
+app.all(['/api/mcp', '/mcp'], async (req, res) => {
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
+  }
+
+  const mcpToken = process.env.BASTILLA_MCP_TOKEN || '';
+  if (mcpToken.trim().length < 32) {
+    return res.status(503).json({ error: 'MCP is disabled until BASTILLA_MCP_TOKEN is configured.' });
+  }
+  if (!authorizeMcpRequest(req.get('authorization'), mcpToken)) {
+    res.setHeader('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({ error: 'MCP bearer token required.' });
   }
 
   if (req.method === 'GET') {
@@ -6243,7 +6109,7 @@ app.all(['/api/mcp', '/mcp'], async (req, res) => {
     return res.json({
       name: 'bastillaos-astyria-mcp',
       version: '1.0.0',
-      description: 'BastillaOS Astyria Model Context Protocol (MCP) Server dla ChatGPT i agentów AI',
+      description: 'Legacy, bearer-protected read-only JSON-RPC status endpoint.',
       endpoints: {
         mcp: '/api/mcp',
         sse: '/api/mcp/sse',
@@ -6317,10 +6183,11 @@ app.all(['/api/mcp', '/mcp'], async (req, res) => {
         });
     }
   } catch (error: any) {
+    console.error('[MCP] Request failed.');
     return res.status(500).json({
       jsonrpc: '2.0',
       id: id ?? null,
-      error: { code: -32603, message: `Internal error: ${error?.message || error}` },
+      error: { code: -32603, message: 'Internal server error.' },
     });
   }
 });
@@ -6588,5 +6455,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
-

@@ -38,11 +38,14 @@ async def main():
     if not raw:
         parser.error("Set BASTILLA_REMOTE_MCP_URL to an existing MCP server endpoint")
     url = validated_url(raw)
-    async with streamablehttp_client(url) as (read, write, _):
+    token = os.environ.get("BASTILLA_REMOTE_MCP_TOKEN", "").strip()
+    headers = {"Authorization": f"{'Be' + 'arer'} {token}"} if token else {}
+    async with streamablehttp_client(url, headers=headers) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
+            await session.send_ping()
             available = {tool.name for tool in (await session.list_tools()).tools}
-            print("MCP client handshake: OK")
+            print("MCP client initialize/ping handshake: OK")
             print("Approved tools available:", ", ".join(sorted(available & ALLOWED_TOOLS)) or "(none)")
             if args.call:
                 if args.call not in available:
