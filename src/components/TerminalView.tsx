@@ -254,6 +254,7 @@ const TerminalInputBar = React.memo(({ onExecute, history, antiMirrorActive, onT
           <input
             ref={inputRef}
             type="text"
+            aria-label="Polecenie terminala"
             value={cmdText}
             onChange={(e) => setCmdText(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -758,6 +759,10 @@ Integralność tagów:  ZGODNA (<<<DATA_STORE_START>>> ... <<<DATA_STORE_END>>>)
       <div
         dir="ltr"
         style={{ direction: 'ltr', textAlign: 'left' }}
+        role="log"
+        aria-label="Wyjście terminala"
+        aria-live="polite"
+        aria-relevant="additions"
         className="flex-1 min-h-0 min-w-0 overflow-y-auto p-4 space-y-2 select-text"
       >
         {logs.slice(-150).map((entry) => (
@@ -777,4 +782,3 @@ Integralność tagów:  ZGODNA (<<<DATA_STORE_START>>> ... <<<DATA_STORE_END>>>)
     </div>
   );
 };
-

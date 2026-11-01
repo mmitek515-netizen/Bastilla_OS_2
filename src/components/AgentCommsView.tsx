@@ -151,7 +151,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-slate-950 font-mono text-xs cyber-grid lg:flex-row">
-      <div className="grid grid-cols-2 gap-1 border-b border-slate-800 bg-slate-900/90 p-1.5 lg:hidden">
+      <div className="chat-mobile-tabs grid grid-cols-2 gap-1 border-b border-slate-800 bg-slate-900/90 p-1.5 lg:hidden">
         <button
           type="button"
           onClick={() => setMobileSection('chat')}
@@ -174,8 +174,8 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
       {/* Left/Main Column: Chat Stream */}
       <div className={`${mobileSection === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-r border-slate-800/80 bg-slate-950/70 backdrop-blur-md lg:flex`}>
         {/* Futuristic Channel Bar */}
-        <div className="bg-slate-900/80 backdrop-blur-md border-b border-cyan-500/20 px-2 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-sm shrink-0">
-          <div className="flex min-w-0 max-w-full items-center gap-1.5 sm:gap-2.5 flex-wrap">
+        <div className="chat-channel-bar bg-slate-900/80 backdrop-blur-md border-b border-cyan-500/20 px-2 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-sm shrink-0">
+          <div className="chat-channel-primary flex min-w-0 max-w-full items-center gap-1.5 sm:gap-2.5 flex-wrap">
             <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px] shrink-0">WĘZEŁ:</span>
             <select
               aria-label="Cel transmisji"
@@ -192,7 +192,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             </select>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 text-slate-400 text-[11px] flex-wrap">
+          <div className="chat-channel-actions flex items-center gap-1.5 sm:gap-2 text-slate-400 text-[11px] flex-wrap">
             <span className="hidden sm:inline-flex items-center gap-1.5 font-mono text-[10px] text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2.5 py-0.5 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.2)]">
               <Sigma className="w-3 h-3 text-emerald-400" />
               WITHOUT_NLP: OK
@@ -341,6 +341,10 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
         </div>
         <div
           ref={chatScrollRef}
+          role="log"
+          aria-label="Historia czatu"
+          aria-live="polite"
+          aria-relevant="additions"
           onScroll={(event) => {
             const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
             followLatestMessagesRef.current = scrollHeight - scrollTop - clientHeight < 120;
@@ -509,7 +513,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             <span className="hidden text-[11px] sm:inline">TRANSMISJA</span>
           </button>
           </div>
-          <p className="mt-1 px-1 text-[9px] text-slate-500">
+          <p className="chat-attachment-note mt-1 px-1 text-[9px] text-slate-500">
             Maks. 10 plików; tekst 5 MB/plik i 20 MB łącznie, DOCX 20 MB (10 MB po rozpakowaniu), PDF/JPG 20 MB/plik i 40 MB łącznie.
           </p>
         </form>
@@ -599,4 +603,3 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     </div>
   );
 };
-

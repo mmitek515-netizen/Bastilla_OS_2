@@ -53,6 +53,16 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   .header-actions button, .header-actions a { min-height: 40px; min-width: 40px; justify-content: center; }
   .app-main button:not([role="switch"]) { min-height: 40px; }
 }
+@media (max-width: 639px) and (max-height: 480px) {
+  .header-brand, .header-actions, .header-quick-actions { flex-wrap: nowrap; }
+  .header-brand { max-width: 100%; overflow-x: auto; }
+  .header-actions { overflow-x: auto; }
+  .header-quick-actions { flex-shrink: 0; }
+  .chat-mobile-tabs { padding: 0; }
+  .chat-channel-bar { flex-wrap: nowrap; overflow-x: auto; padding-block: 0.25rem; }
+  .chat-channel-primary, .chat-channel-actions { flex-wrap: nowrap; flex-shrink: 0; }
+  .chat-attachment-note { display: none; }
+}
 @media (min-width: 1024px) { .health-dock { display: block; bottom: calc(5.5rem + var(--sab)); } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
@@ -172,5 +182,3 @@ input, select, textarea {
 .animate-neon-pulse {
   animation: neonPulse 2.5s infinite ease-in-out;
 }
-
-

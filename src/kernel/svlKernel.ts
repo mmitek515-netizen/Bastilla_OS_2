@@ -332,6 +332,7 @@ export const INITIAL_BACKUP_DATA_STORE: DataStore = {
 
 export const OPERATOR_NAME = "Mateusz Mitek";
 export const OPERATOR_TITLE = "Tata";
+export const BASTILLA_OS_2_VERSION = "2.0.0";
 export const SYS_VERSION = "9.0.0-Triada-BestOS-Mission";
 
 /**

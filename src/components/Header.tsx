@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DataStore, OPERATOR_NAME, SYS_VERSION, generateTextReport, generatePythonMonolith } from '../kernel/svlKernel';
+import { BASTILLA_OS_2_VERSION, DataStore, OPERATOR_NAME, SYS_VERSION, generateTextReport, generatePythonMonolith } from '../kernel/svlKernel';
 import { Terminal, Copy, Download, RefreshCw, ShieldCheck, Cpu, Clock, Check, ExternalLink } from 'lucide-react';
 
 interface HeaderProps {
@@ -77,16 +77,19 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
       <div className="mx-auto flex w-full min-w-0 flex-wrap items-center justify-between gap-2 px-2 py-2 text-xs sm:gap-3 sm:px-4">
         {/* Brand & Kernel identity */}
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="header-brand flex min-w-0 flex-wrap items-center gap-2">
             <span className="relative flex h-2.5 w-2.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_10px_#10b981]" />
             </span>
-            <span             className="bg-gradient-to-r from-blue-100 via-cyan-200 to-blue-300 bg-clip-text font-mono text-sm font-extrabold tracking-[0.16em] text-transparent">
-            BASTILLA OS
+            <span className="bg-gradient-to-r from-blue-100 via-cyan-200 to-blue-300 bg-clip-text font-mono text-sm font-extrabold tracking-[0.16em] text-transparent">
+            BASTILLA OS 2
             </span>
-            <span title={formattedVersion} className="max-w-36 truncate rounded border border-blue-200/15 bg-blue-950/50 px-2 py-0.5 font-mono text-[10px] font-bold text-blue-100/75 sm:max-w-none">
-              {formattedVersion}
+            <span title={`Wersja Bastilla OS 2: v${BASTILLA_OS_2_VERSION}`} className="rounded border border-amber-300/20 bg-amber-950/30 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-100/80">
+              v{BASTILLA_OS_2_VERSION}
+            </span>
+            <span title={`Wersja jądra SVL: ${formattedVersion}`} className="max-w-36 truncate rounded border border-blue-200/15 bg-blue-950/50 px-2 py-0.5 font-mono text-[10px] font-bold text-blue-100/75 sm:max-w-none">
+              SVL {formattedVersion}
             </span>
             <span className="hidden items-center gap-1 rounded border border-emerald-400/15 bg-emerald-950/30 px-2 py-0.5 font-mono text-[9px] text-emerald-300 lg:inline-flex">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -145,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
           </div>
 
           {/* Quick Action buttons */}
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <div className="header-quick-actions flex min-w-0 flex-wrap items-center gap-1">
             {onSyncSystem && (
               <button
                 onClick={handleTriggerSync}
@@ -244,4 +247,3 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
     </header>
   );
 };
-

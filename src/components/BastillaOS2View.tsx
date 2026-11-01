@@ -14,6 +14,7 @@ import {
   HardDrive,
   Cpu,
 } from 'lucide-react';
+import { BASTILLA_OS_2_VERSION } from '../kernel/svlKernel';
 
 interface AgentTaskArtifact {
   path: string;
@@ -256,7 +257,7 @@ export const BastillaOS2View: React.FC = () => {
             </div>
             <div className="mt-3 flex items-baseline justify-between">
               <span className="text-base font-bold text-[#1A1612]">HTML5/Tailwind</span>
-              <span className="text-xs text-emerald-700 font-semibold font-mono tabular-nums">v2.0.0</span>
+              <span className="text-xs text-emerald-700 font-semibold font-mono tabular-nums">v{BASTILLA_OS_2_VERSION}</span>
             </div>
             <div className="text-[11px] text-[#8C7E6D] mt-2 border-t border-[#F0EAE1] pt-2">
               Własna ścieżka i responsywny pulpit.
