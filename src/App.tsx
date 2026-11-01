@@ -23,7 +23,6 @@ import { TaskProcessMatrix } from './components/TaskProcessMatrix';
 import { MemorySchemaGraph } from './components/MemorySchemaGraph';
 import { TemporalMatrix } from './components/TemporalMatrix';
 import { AstyriaMissionView } from './components/AstyriaMissionView';
-import { TriadVisualization } from './components/TriadVisualization';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SystemHealthDock } from './components/SystemHealthDock';
 import { FileExplorer } from './components/FileExplorer';
@@ -46,6 +45,10 @@ import {
 import { ChatAttachment, formatChatMessage } from './kernel/chatAttachments';
 import { isChatSystemChange } from './kernel/chatChanges';
 import type { ChatSystemChange } from './kernel/chatChanges';
+
+const TriadVisualization = React.lazy(() =>
+  import('./components/TriadVisualization').then(({ TriadVisualization }) => ({ default: TriadVisualization }))
+);
 
 const LOCAL_STORAGE_KEY = 'svl_kernel_datastore_v8_6_0_without_nlp';
 
@@ -602,7 +605,9 @@ export default function App() {
           )}
 
           {activeTab === 'visualizer' && (
-            <TriadVisualization />
+            <React.Suspense fallback={<div role="status" className="p-4 text-sm text-slate-400">Ładowanie wizualizatora…</div>}>
+              <TriadVisualization />
+            </React.Suspense>
           )}
 
           {activeTab === 'file_explorer' && (

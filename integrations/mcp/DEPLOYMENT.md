@@ -33,6 +33,9 @@ BASTILLA_MCP_URL=http://127.0.0.1:8000/mcp .venv-mcp/bin/python integrations/mcp
 
 ## Automated verification
 
-GitHub Actions runs a protocol-level MCP smoke test against a **mock** BastillaOS API. It validates MCP negotiation, both tools, and rejection of unsupported commands. This is not a production availability check.
+The offline MCP bridge tests are not part of the current GitHub Actions workflow.
+Run `integrations/mcp/smoke_test.py` against an actual local bridge to verify
+initialize, ping, tool listing, and read-only diagnostics. This is not a production
+availability check or proof of a remote ChatGPT connection.
 
 The bridge is intentionally read-only and restricts agent commands to a small allowlist. Adding privileged or shell-execution tools requires a separate security review, access controls, and explicit authorization.

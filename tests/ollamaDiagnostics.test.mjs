@@ -84,3 +84,28 @@ test('brak modeli, nieużywane duże modele i adres spoza pętli zwrotnej', asyn
   assert.ok(recs.some((r) => r.agent === 'Aurelius' && /nie przez pętlę zwrotną/.test(r.text)));
   assert.ok(recs.every((r) => ['Alex', 'Astyria', 'Aurelius'].includes(r.agent)));
 });
+
+test('configured model missing from Ollama inventory is not reported or benchmarked', async () => {
+  const { impl, calls } = router(healthyRoutes());
+  const diag = await collectOllamaDiagnostics(
+    'http://127.0.0.1:11434',
+    { ...host, configuredModel: 'qwen3:14b' },
+    impl,
+  );
+  assert.equal(diag.resolvedModel, null);
+  assert.match(diag.error, /qwen3:14b.*nie znajduje się na liście/);
+  assert.equal(calls.some((call) => call.url.includes('/api/chat')), false);
+  assert.match(buildOllamaRecommendations(diag)[0].text, /qwen3:14b.*nie jest dostępny/);
+});
+
+test('model inventory errors are not mislabeled as an empty Ollama installation', async () => {
+  const { impl } = router([
+    [/api\/version/, () => json(200, { version: '0.9.0' })],
+    [/api\/tags/, () => json(503, { error: 'unavailable' })],
+    [/api\/ps/, () => json(200, { models: [] })],
+  ]);
+  const diag = await collectOllamaDiagnostics('http://127.0.0.1:11434', host, impl);
+  assert.equal(diag.reachable, true);
+  assert.match(diag.error, /HTTP 503/);
+  assert.match(buildOllamaRecommendations(diag)[0].text, /Nie można odczytać inwentarza/);
+});

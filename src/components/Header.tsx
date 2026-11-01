@@ -90,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
             </span>
             <span className="hidden items-center gap-1 rounded border border-emerald-400/15 bg-emerald-950/30 px-2 py-0.5 font-mono text-[9px] text-emerald-300 lg:inline-flex">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            DEBIAN · SVL READY
+            INTERFEJS WEB · ZAŁADOWANY
             </span>
           </div>
 
@@ -110,21 +110,18 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
         {/* Runtime State Indicators */}
         <div className="header-actions flex w-full min-w-0 flex-wrap items-center gap-2 text-[11px] font-mono text-slate-400 sm:w-auto sm:max-w-full">
           {dataStore.config?.root_privileges && (
-            <div className="hidden items-center gap-1.5 bg-red-950/80 border border-red-500/60 px-2.5 py-1 rounded text-red-300 font-bold shadow-[0_0_12px_rgba(239,68,68,0.3)] sm:flex">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span>ROOT: RING-0 (TRIADA)</span>
+            <div className="hidden items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2.5 py-1 rounded text-slate-300 font-bold sm:flex">
+              <span>RING-0: konfiguracja</span>
             </div>
           )}
 
           {/* Commander Alex Badge */}
           <div className="hidden items-center gap-1.5 bg-emerald-950/80 border border-emerald-500/50 px-2.5 py-1 rounded text-emerald-300 font-bold shadow-[0_0_10px_rgba(16,185,129,0.25)] sm:flex">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>INFRA: DOWÓDCA ALEX</span>
+            <span>PROFIL INFRA: ALEX</span>
           </div>
 
           <div className="hidden xl:flex items-center gap-1.5 bg-cyan-950/70 border border-cyan-500/40 px-2 py-1 rounded text-cyan-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-            <span>ASTYRIA AUTO-REPAIR: ON</span>
+            <span>AUTO-REPAIR: konfiguracja</span>
           </div>
 
           <div className="hidden items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2.5 py-1 rounded backdrop-blur md:flex">
@@ -244,4 +241,3 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
     </header>
   );
 };
-

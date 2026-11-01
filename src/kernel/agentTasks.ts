@@ -23,6 +23,52 @@ export interface AgentTask {
 }
 
 const TASKS_STORAGE_PATH = path.resolve('data', 'agent_tasks.json');
+const SYNTHETIC_TASK_IDS = new Set([
+  'task-bastilla-os-2-scaffold',
+  'task-system-snapshot-vm',
+  'task-sqlite-integrity-audit',
+  'task-ollama-runtime-check',
+]);
+const TASK_ACTION_TYPES = new Set(['audit_system_integrity', 'scaffold_app', 'write_app_file']);
+
+function validateAppId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(value)) {
+    throw new Error('Nieprawidłowy identyfikator aplikacji.');
+  }
+  return value;
+}
+
+function validateAppFilename(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || !value
+    || value.trim() !== value
+    || value === '.'
+    || value === '..'
+    || /[\\/]/.test(value)
+  ) {
+    throw new Error('Nazwa pliku musi być pojedynczą nazwą bez separatorów ścieżki.');
+  }
+  return value;
+}
+
+function assertSafeAppDirectory(appDir: string): void {
+  const appsRoot = path.resolve('apps');
+  if (fs.lstatSync(appsRoot).isSymbolicLink() || fs.lstatSync(appDir).isSymbolicLink()) {
+    throw new Error('Katalog aplikacji nie może być dowiązaniem symbolicznym.');
+  }
+  const realAppsRoot = fs.realpathSync(appsRoot);
+  const realAppDir = fs.realpathSync(appDir);
+  if (!realAppDir.startsWith(`${realAppsRoot}${path.sep}`)) {
+    throw new Error('Katalog aplikacji musi znajdować się wewnątrz apps/.');
+  }
+}
+
+function assertNotSymlink(filePath: string): void {
+  if (fs.existsSync(filePath) && fs.lstatSync(filePath).isSymbolicLink()) {
+    throw new Error('Plik aplikacji nie może być dowiązaniem symbolicznym.');
+  }
+}
 
 function ensureDataDir(): void {
   const dir = path.dirname(TASKS_STORAGE_PATH);
@@ -38,6 +84,13 @@ function ensureDataDir(): void {
  * Self-healing: if an artifact file was temporarily missing and now exists, it is validated.
  */
 function verifyTaskArtifact(task: AgentTask): AgentTask {
+  if (task.status === 'completed' && SYNTHETIC_TASK_IDS.has(task.id)) {
+    return {
+      ...task,
+      status: 'failed',
+      error: 'Wstępnie wypełnione zadanie nie potwierdza rzeczywistego wykonania.',
+    };
+  }
   if (task.status === 'completed' || (task.status === 'failed' && task.error?.startsWith('Brak pliku artefaktu na dysku:'))) {
     if (!task.artifact || !task.artifact.path) {
       return {
@@ -56,6 +109,13 @@ function verifyTaskArtifact(task: AgentTask): AgentTask {
     }
     try {
       const stats = fs.statSync(fullPath);
+      if (!stats.isFile()) {
+        return {
+          ...task,
+          status: 'failed',
+          error: `Artefakt nie jest zwykłym plikiem: ${task.artifact.path}`,
+        };
+      }
       task.artifact.sizeBytes = stats.size;
       if (task.status === 'failed') {
         task.status = 'completed';
@@ -70,99 +130,6 @@ function verifyTaskArtifact(task: AgentTask): AgentTask {
     }
   }
   return task;
-}
-
-function seedDefaultTasks(): AgentTask[] {
-  const now = new Date().toISOString();
-  const tasks: AgentTask[] = [
-    {
-      id: 'task-bastilla-os-2-scaffold',
-      agent: 'Astyria',
-      title: 'Budowa prototypu Bastilla_OS_2 (Ivory & Gold)',
-      description: 'Utworzenie aplikacji Bastilla_OS_2 w apps/bastilla_os_2 z responsywnym pulpitem w estetyce Bastili Shan.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Inicjalizacja katalogu apps/bastilla_os_2.`,
-        `[${now}] Generowanie manifestu app.json i stylów kości słoniowej i złota.`,
-        `[${now}] Zapis pliku wejściowego index.html.`,
-        `[${now}] Zweryfikowano fizyczny plik na dysku: apps/bastilla_os_2/index.html.`,
-      ],
-      result: 'Prototyp Bastilla_OS_2 utworzony pomyślnie. Gotowy do uruchomienia i inspekcji.',
-      artifact: {
-        path: 'apps/bastilla_os_2/index.html',
-        name: 'index.html',
-        sizeBytes: 0,
-      },
-    },
-    {
-      id: 'task-system-snapshot-vm',
-      agent: 'Alex',
-      title: 'Weryfikacja migawki jądra VM_Ten_System',
-      description: 'Zapis i weryfikacja spójnego snapshotu JSON stanu jądra w katalogu exports.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Odczyt stanu jądra Python i telemetrycznych metryk pamięci RAM.`,
-        `[${now}] Zapis danych do pliku exports/vm_ten_system_snapshot.json.`,
-        `[${now}] Weryfikacja integralności schematu JSON snapshotu.`,
-      ],
-      result: 'Snapshot maszyny VM_Ten_System zaktualizowany i gotowy do inspekcji.',
-      artifact: {
-        path: 'exports/vm_ten_system_snapshot.json',
-        name: 'vm_ten_system_snapshot.json',
-        sizeBytes: 0,
-      },
-    },
-    {
-      id: 'task-sqlite-integrity-audit',
-      agent: 'Aurelius',
-      title: 'Audyt fizycznej bazy danych SQLite',
-      description: 'Weryfikacja integralności magazynu danych w data/databases/core_data.sqlite.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Skanowanie katalogu data/databases.`,
-        `[${now}] Weryfikacja istnienia bazy core_data.sqlite.`,
-        `[${now}] Potwierdzono obecność pliku bazy danych na dysku.`,
-      ],
-      result: 'Baza SQLite zweryfikowana. Plik istnieje w systemie plików.',
-      artifact: {
-        path: 'data/databases/core_data.sqlite',
-        name: 'core_data.sqlite',
-        sizeBytes: 0,
-      },
-    },
-    {
-      id: 'task-ollama-runtime-check',
-      agent: 'Aria',
-      title: 'Diagnostyka wykonawcza Ollama',
-      description: 'Weryfikacja dostępności demona Ollama pod adresem http://127.0.0.1:11434 i skryptu setup.',
-      status: 'completed',
-      createdAt: now,
-      startedAt: now,
-      completedAt: now,
-      logs: [
-        `[${now}] Odpytanie punktu końcowego Ollama API.`,
-        `[${now}] Zweryfikowano obecność instalatora w scripts/setup-ollama.sh.`,
-        `[${now}] Status połączenia zarejestrowany w pamięci serwera.`,
-      ],
-      result: 'Diagnostyka wykonana. Skrypt konfiguracyjny istnieje na dysku.',
-      artifact: {
-        path: 'scripts/setup-ollama.sh',
-        name: 'setup-ollama.sh',
-        sizeBytes: 0,
-      },
-    },
-  ];
-
-  return tasks.map(verifyTaskArtifact);
 }
 
 class AgentTaskRegistry {
@@ -193,12 +160,6 @@ class AgentTaskRegistry {
       }
     }
 
-    // Seed default tasks
-    const defaults = seedDefaultTasks();
-    for (const t of defaults) {
-      this.tasks.set(t.id, t);
-    }
-    this.saveToDisk();
   }
 
   private saveToDisk(): void {
@@ -275,6 +236,17 @@ class AgentTaskRegistry {
     actionType: string;
     payload?: Record<string, any>;
   }): Promise<AgentTask> {
+    if (!TASK_ACTION_TYPES.has(params.actionType)) {
+      throw new Error(`Nieobsługiwany typ zadania: ${params.actionType}`);
+    }
+    const payload = params.payload ?? {};
+    if (params.actionType === 'scaffold_app') {
+      validateAppId(payload.targetAppId || 'bastilla_os_2');
+    }
+    if (params.actionType === 'write_app_file') {
+      validateAppId(payload.appId || 'bastilla_os_2');
+      validateAppFilename(payload.filename || 'config.json');
+    }
     const taskId = `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
 
@@ -333,16 +305,18 @@ class AgentTaskRegistry {
         }
 
         const reportPath = path.join(exportsDir, 'system_integrity_report.json');
+        const checks = {
+          server_entrypoint: fs.existsSync(path.resolve('server.ts')),
+          package_manifest: fs.existsSync(path.resolve('package.json')),
+          apps_directory: fs.existsSync(path.resolve('apps')),
+          data_directory: fs.existsSync(path.resolve('data')),
+        };
+        const integrityVerified = Object.values(checks).every(Boolean);
         const reportData = {
           timestamp: new Date().toISOString(),
           agent: task.agent,
-          status: 'INTEGRITY_VERIFIED',
-          checks: {
-            server_entrypoint: fs.existsSync(path.resolve('server.ts')),
-            package_manifest: fs.existsSync(path.resolve('package.json')),
-            apps_directory: fs.existsSync(path.resolve('apps')),
-            data_directory: fs.existsSync(path.resolve('data')),
-          },
+          status: integrityVerified ? 'INTEGRITY_VERIFIED' : 'INTEGRITY_ISSUES_FOUND',
+          checks,
         };
 
         fs.writeFileSync(reportPath, JSON.stringify(reportData, null, 2), 'utf-8');
@@ -354,8 +328,11 @@ class AgentTaskRegistry {
           sizeBytes: fs.statSync(reportPath).size,
         };
         task.result = `Raport integralności wygenerowany pomyślnie (${task.artifact.sizeBytes} B).`;
+        if (!integrityVerified) {
+          throw new Error('Audyt integralności wykrył brakujące wymagane pliki lub katalogi.');
+        }
       } else if (actionType === 'scaffold_app') {
-        const appId = payload.targetAppId || 'bastilla_os_2';
+        const appId = validateAppId(payload.targetAppId || 'bastilla_os_2');
         appendLog(`Weryfikacja/tworzenie struktury aplikacji apps/${appId}...`);
         await new Promise((r) => setTimeout(r, 400));
 
@@ -363,8 +340,10 @@ class AgentTaskRegistry {
         if (!fs.existsSync(appDir)) {
           fs.mkdirSync(appDir, { recursive: true });
         }
+        assertSafeAppDirectory(appDir);
 
         const manifestPath = path.join(appDir, 'app.json');
+        assertNotSymlink(manifestPath);
         if (!fs.existsSync(manifestPath)) {
           const manifest = {
             id: appId,
@@ -389,8 +368,8 @@ class AgentTaskRegistry {
         };
         task.result = `Aplikacja ${appId} zweryfikowana. Manifest gotowy na dysku.`;
       } else if (actionType === 'write_app_file') {
-        const appId = payload.appId || 'bastilla_os_2';
-        const filename = payload.filename || 'config.json';
+        const appId = validateAppId(payload.appId || 'bastilla_os_2');
+        const filename = validateAppFilename(payload.filename || 'config.json');
         const content = payload.content || JSON.stringify({ updated: true, agent: task.agent, timestamp: new Date().toISOString() }, null, 2);
 
         appendLog(`Zapisywanie pliku ${filename} do apps/${appId}...`);
@@ -399,12 +378,15 @@ class AgentTaskRegistry {
           fs.mkdirSync(appDir, { recursive: true });
           appendLog(`Utworzono brakujący katalog aplikacji apps/${appId}.`);
         }
+        assertSafeAppDirectory(appDir);
 
         const filePath = path.join(appDir, filename);
+        assertNotSymlink(filePath);
         fs.writeFileSync(filePath, content, 'utf-8');
         appendLog(`Zapisano plik apps/${appId}/${filename}.`);
 
         const mPath = path.join(appDir, 'app.json');
+        assertNotSymlink(mPath);
         if (fs.existsSync(mPath)) {
           try {
             const m = JSON.parse(fs.readFileSync(mPath, 'utf-8'));
@@ -437,28 +419,7 @@ class AgentTaskRegistry {
         };
         task.result = `Plik ${filename} w aplikacji ${appId} zapisany (${task.artifact.sizeBytes} B).`;
       } else {
-        const exportsDir = path.resolve('exports');
-        if (!fs.existsSync(exportsDir)) {
-          fs.mkdirSync(exportsDir, { recursive: true });
-        }
-        const diagPath = path.join(exportsDir, `diag_${task.agent.toLowerCase()}_${Date.now()}.json`);
-        const diag = {
-          taskId,
-          agent: task.agent,
-          title: task.title,
-          timestamp: new Date().toISOString(),
-          systemStatus: 'ONLINE',
-          completed: true,
-        };
-        fs.writeFileSync(diagPath, JSON.stringify(diag, null, 2), 'utf-8');
-        appendLog(`Zakończono operację diagnostyczną i utworzono artefakt.`);
-
-        task.artifact = {
-          path: path.relative(path.resolve('.'), diagPath),
-          name: path.basename(diagPath),
-          sizeBytes: fs.statSync(diagPath).size,
-        };
-        task.result = `Operacja zakończona pomyślnie.`;
+        throw new Error(`Nieobsługiwany typ zadania: ${actionType}`);
       }
 
       // STRICT VALIDATION: completed requires artifact on disk

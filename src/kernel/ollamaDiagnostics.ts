@@ -79,6 +79,7 @@ export async function collectOllamaDiagnostics(
     return response.json() as Promise<any>;
   };
 
+  let modelInventoryLoaded = false;
   try {
     const version = await getJson('/api/version');
     result.reachable = true;
@@ -94,15 +95,21 @@ export async function collectOllamaDiagnostics(
       name: String(model?.name || ''),
       size: Number(model?.size) || 0,
     })).filter((model: OllamaModelInfo) => model.name);
+    modelInventoryLoaded = true;
   } catch (error: any) {
     result.error = `Nie można pobrać listy modeli: ${String(error?.message || error)}`;
   }
 
   const chatModels = result.models.filter((model) => !embeddingModel.test(model.name));
   const configured = host.configuredModel.trim();
-  result.resolvedModel = configured && configured.toLowerCase() !== 'auto'
-    ? configured
-    : [...chatModels].sort((a, b) => b.size - a.size)[0]?.name ?? null;
+  if (configured && configured.toLowerCase() !== 'auto') {
+    result.resolvedModel = chatModels.find((model) => model.name.toLowerCase() === configured.toLowerCase())?.name ?? null;
+    if (!result.resolvedModel && modelInventoryLoaded) {
+      result.error = `Skonfigurowany model ${configured} nie znajduje się na liście modeli Ollamy.`;
+    }
+  } else {
+    result.resolvedModel = [...chatModels].sort((a, b) => b.size - a.size)[0]?.name ?? null;
+  }
 
   if (result.resolvedModel) {
     // Krótki pomiar: czas do pierwszego wyniku i prędkość generowania (model jest rozgrzany wcześniej).
@@ -170,11 +177,25 @@ export function buildOllamaRecommendations(diag: OllamaDiagnostics): OllamaRecom
     return out;
   }
 
+  if (diag.error && diag.models.length === 0) {
+    out.push({ agent: 'Alex', text: `Nie można odczytać inwentarza modeli Ollamy: ${diag.error}` });
+    return out;
+  }
+
   const chatModels = diag.models.filter((model) => !embeddingModel.test(model.name));
   if (chatModels.length === 0) {
     out.push({
       agent: 'Alex',
       text: 'Ollama działa, ale nie ma pobranego żadnego modelu czatu.',
+      command: 'npm run setup:ollama',
+    });
+    return out;
+  }
+
+  if (!diag.resolvedModel) {
+    out.push({
+      agent: 'Alex',
+      text: `Skonfigurowany model ${diag.configuredModel} nie jest dostępny w lokalnej bibliotece Ollamy.`,
       command: 'npm run setup:ollama',
     });
     return out;

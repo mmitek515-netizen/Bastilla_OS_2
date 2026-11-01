@@ -12,6 +12,7 @@ import os from 'os';
 import { randomUUID, createHash } from 'crypto';
 import { INITIAL_DATA_STORE } from './src/kernel/svlKernel';
 import type { ChatSystemChange } from './src/kernel/chatChanges';
+import { resolveServerHost } from './src/kernel/serverHost';
 import { withoutNlpEngine } from './src/lib/withoutNlpEngine';
 import {
   DEFAULT_OLLAMA_BASE_URL,
@@ -153,6 +154,7 @@ const app = express();
 const portArgIndex = process.argv.indexOf('--port');
 const DEFAULT_PORT = Number(portArgIndex >= 0 ? process.argv[portArgIndex + 1] : process.env.PORT || 3000);
 const PORT = Number.isFinite(DEFAULT_PORT) && DEFAULT_PORT > 0 ? DEFAULT_PORT : 3000;
+const BIND_HOST = resolveServerHost();
 let activeServerPort = PORT;
 const PYTHON_SCRIPT_PATH = path.resolve('svl_kernel.py');
 const KERNEL_STORE_PATH = path.resolve(process.env.SVL_KERNEL_STORE_PATH || '.svl_kernel_store.json');
@@ -1469,7 +1471,6 @@ if __name__ == "__main__":
 // 1. GET /api/apps/list - List all created applications with stats and manifests
 app.get('/api/apps/list', (_req, res) => {
   try {
-    initializeDefaultApps();
     const appDirs = fs.readdirSync(APPS_DIR).filter(item => {
       try {
         return fs.statSync(path.join(APPS_DIR, item)).isDirectory();
@@ -2460,9 +2461,10 @@ export interface HealedIncident {
 }
 
 const systemLogs: SystemLogEntry[] = [];
-let autoRepairEnabled = true;
-let continuousMissionEnabled = true;
-let triadaGithubAutoPush = true;
+const AUTONOMOUS_MISSION_ENABLED = process.env.BASTILLA_AUTONOMOUS_MISSION === 'true';
+let autoRepairEnabled = AUTONOMOUS_MISSION_ENABLED;
+let continuousMissionEnabled = AUTONOMOUS_MISSION_ENABLED;
+let triadaGithubAutoPush = false;
 
 // --- VM_TEN_SYSTEM HYPERVISOR & PRODUCTION IMPROVEMENTS (DEPLOYED BY ASTYRIA) ---
 export interface VmTenSystemState {
@@ -3374,6 +3376,12 @@ app.get('/api/github/auto-sync/status', (_req, res) => {
 });
 
 async function startAutoGitSync(): Promise<void> {
+  if (process.env.BASTILLA_AUTO_GIT_SYNC !== 'true') {
+    autoGitSyncEnabled = false;
+    triadaGithubAutoPush = false;
+    pushSystemLog('info', 'KERNEL', '[GITHUB AUTO] Synchronizacja commit/push wyłączona; ustaw BASTILLA_AUTO_GIT_SYNC=true, aby jawnie ją włączyć.');
+    return;
+  }
   try {
     // Zmiany istniejące przed startem także muszą zostać zsynchronizowane po stabilizacji.
     for (const file of await getAutoGitSyncChanges()) {
@@ -6080,12 +6088,12 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
       const state = await getPythonKernelState(true);
       const mem = getVmMemoryTelemetry();
       const statusText = [
-        `=== BASTILLA OS · SVL KERNEL STATUS ===`,
+        `=== BASTILLA OS 2 · LOCAL WEB RUNTIME STATUS ===`,
         `Wersja: ${state?.store?.config?.sys_version || state?.sys_version || '9.0.0'}`,
         `Pamięć RAM: ${mem.rssMB} MB (${mem.utilizationPercent}%)`,
         `Migawki VM: ${vmTenSystemState.snapshotsCount}`,
         `Wyleczone incydenty: ${healedIncidents.length}`,
-        `Aktywni agenci: Alex, Astyria, Aurelius, Aria`,
+        `Profile agentów (aktywna inferencja niepotwierdzona): Alex, Astyria, Aurelius, Aria`,
       ].join('\n');
       return {
         content: [{ type: 'text', text: statusText }],
@@ -6361,7 +6369,7 @@ app.post('/api/agent-tasks/run', async (req, res) => {
     });
     return res.json({ success: true, task });
   } catch (err: any) {
-    return res.status(500).json({ success: false, error: err?.message || String(err) });
+    return res.status(400).json({ success: false, error: err?.message || String(err) });
   }
 });
 
@@ -6415,20 +6423,22 @@ async function bootstrapTriadMission() {
         privilege_level: 'RING_0_ROOT_KERNEL',
         terminal_root_execution: 'ENABLED',
         root_agents: TRIADA_ROOT_AGENTS,
-        self_modification_scope: 'FULL_APPLICATION_MUTATION',
+        self_modification_scope: AUTONOMOUS_MISSION_ENABLED ? 'FULL_APPLICATION_MUTATION' : 'OPERATOR_APPROVED_ONLY',
         mission_directive: TRIADA_MISSION_DIRECTIVE,
         mission_objective: 'Stworzenie najlepszego systemu operacyjnego na bazie SVL_System/BastillaOS',
         mission_agents: [...TRIAD_AGENT_NAMES],
-        mission_background: 'CONTINUOUS_ACTIVE',
-        astyria_continuous_repair: true,
-        continuous_mission: 'ACTIVE',
-        mission_autonomy: 'FULL_AUTO',
-        mission_scope: ['IMPROVE_SYSTEM', 'ADAPT_TO_OPERATOR', 'CONTINUOUS_DEVELOPMENT', 'SELF_UPDATE_FROM_INTERNET'],
+        mission_background: AUTONOMOUS_MISSION_ENABLED ? 'CONTINUOUS_ACTIVE' : 'DISABLED',
+        astyria_continuous_repair: AUTONOMOUS_MISSION_ENABLED,
+        continuous_mission: AUTONOMOUS_MISSION_ENABLED ? 'ACTIVE' : 'DISABLED',
+        mission_autonomy: AUTONOMOUS_MISSION_ENABLED ? 'FULL_AUTO' : 'MANUAL',
+        mission_scope: AUTONOMOUS_MISSION_ENABLED
+          ? ['IMPROVE_SYSTEM', 'ADAPT_TO_OPERATOR', 'CONTINUOUS_DEVELOPMENT', 'SELF_UPDATE_FROM_INTERNET']
+          : ['OPERATOR_APPROVED_ACTIONS'],
         root_scope: 'UNLIMITED_FULL_SYSTEM',
         root_limits: 'NONE',
         operator_privilege_level: 'RING_NEG1_ABSOLUTE_ROOT',
         operator_root_scope: 'SUPREME_UNLIMITED_ABOVE_TRIADA',
-        chat_exec: 'ENABLED_ROOT_UNLIMITED',
+        chat_exec: AUTONOMOUS_MISSION_ENABLED ? 'ENABLED_ROOT_UNLIMITED' : 'DISABLED',
         chat_approvals: 'ENABLED_MANUAL_APPROVAL',
         privileged_actions_require_operator_approval: true,
         privileged_actions_audit_enabled: true,
@@ -6436,7 +6446,7 @@ async function bootstrapTriadMission() {
         update_sources: ['github.com (origin/main + api.github.com)', 'registry npm (npmjs.com)'],
         github_permissions: 'FULL_READ_WRITE',
         github_authorized_agents: ['Alex', 'Astyria', 'Aurelius', 'Aria'],
-        github_auto_push: true,
+        github_auto_push: process.env.BASTILLA_AUTO_GIT_SYNC === 'true',
         github_remote: 'origin/main',
       }),
     ];
@@ -6455,7 +6465,7 @@ async function bootstrapTriadMission() {
     await runPythonKernel(configArgs);
 
     // 2a. Jednorazowe ogłoszenie rozszerzonej autonomii (FULL_AUTO + ROOT UNLIMITED + self-update).
-    if (config.mission_autonomy !== 'FULL_AUTO') {
+    if (AUTONOMOUS_MISSION_ENABLED && config.mission_autonomy !== 'FULL_AUTO') {
       await runPythonKernel([
         '--action', 'batch_msg',
         '--msgs_json', JSON.stringify([
@@ -6468,7 +6478,7 @@ async function bootstrapTriadMission() {
     }
 
     // 2b. Ogłoszenie misji na kanale agentów (tylko przy pierwszej aktywacji, bez spamu przy restarcie).
-    if (!alreadyActive) {
+    if (AUTONOMOUS_MISSION_ENABLED && !alreadyActive) {
       await runPythonKernel([
         '--action', 'batch_msg',
         '--msgs_json', JSON.stringify([
@@ -6480,10 +6490,10 @@ async function bootstrapTriadMission() {
       ]);
     }
 
-    // 3. Automatyczne działanie w tle: ciągła misja + autonaprawa zawsze włączone przy starcie.
-    continuousMissionEnabled = true;
-    autoRepairEnabled = true;
-    triadaGithubAutoPush = config.github_auto_push !== false;
+    // Autonomous background mutation is disabled unless explicitly enabled by the operator.
+    continuousMissionEnabled = AUTONOMOUS_MISSION_ENABLED;
+    autoRepairEnabled = AUTONOMOUS_MISSION_ENABLED;
+    triadaGithubAutoPush = process.env.BASTILLA_AUTO_GIT_SYNC === 'true' && config.github_auto_push === true;
     pushSystemLog(
       'healed',
       'KERNEL',
@@ -6549,9 +6559,9 @@ async function startServer() {
   }
 
   const bindServer = (port: number) => {
-    const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(port, BIND_HOST, () => {
       activeServerPort = port;
-      console.log(`[SVL-KERNEL] Server listening on http://0.0.0.0:${port}`);
+      console.log(`[SVL-KERNEL] Server listening on http://${BIND_HOST}:${port}`);
       if (usesOllama()) {
         // Rozgrzewka w tle: wagi modelu trafiają do pamięci, zanim padnie pierwsza wiadomość.
         void warmupOllama(LLM_CHAIN_CONFIG, AbortSignal.timeout(180000)).then((warm) => {
@@ -6588,5 +6598,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
-

@@ -15,8 +15,8 @@ bastillaos/vm-gemini-4/data/
 .bastilla-tools/
 data/
 exports/
+.runtime/
 .venv*/
 *.qcow2
 *.iso
-
 

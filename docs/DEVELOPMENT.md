@@ -2,15 +2,20 @@
 
 ## First run
 
-Use Node.js 24. Run `npm ci`, then `npm run dev` on port 3000.
+Use Node.js 24.12 or newer. Run `npm ci`, then `npm run dev` on port 3000. The API binds to
+`127.0.0.1` by default. The Codespaces devcontainer explicitly binds to
+`0.0.0.0` and forwards port 3000 as private; do not make that port public.
 Configure model credentials through deployment secrets or a local `.env` based on
 `.env.example`. No model is included; unavailable providers must be reported honestly.
-Keep the Codespaces port private: the recovered backend still requires a full access-control audit.
+The recovered API still lacks account-level authorization. Only expose it behind an
+authenticated ingress. Automatic Git commit/push is disabled unless
+`BASTILLA_AUTO_GIT_SYNC=true` is explicitly set. Autonomous background mutation
+is also disabled unless `BASTILLA_AUTONOMOUS_MISSION=true` is explicitly set.
 
 `npm run verify` runs four independent checks concurrently. GitHub Actions caches npm
-downloads and cancels obsolete runs on the same branch. Automatic Git synchronization
-uses the same command before committing. It cannot resolve competing agent edits;
-use one writer per file and separate worktrees.
+downloads and cancels obsolete runs on the same branch. If automatic Git synchronization
+is explicitly enabled, it uses the same command before committing. It cannot resolve
+competing agent edits; use one writer per file and separate worktrees.
 
 ## Priority queue
 

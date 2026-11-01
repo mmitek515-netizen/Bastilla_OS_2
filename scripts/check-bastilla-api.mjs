@@ -24,6 +24,8 @@ const checks = [
   ['/api/agents/background/status', d => d.monitoring === true && !!d.agents],
   ['/api/ollama/models', d => typeof d.connected === 'boolean'],
   ['/api/vm-gemini-4/status', d => !!d && typeof d === 'object'],
+  ['/api/agent-tasks', d => Array.isArray(d.tasks) && d.stats?.total === d.tasks.length],
+  ['/api/apps/list', d => Array.isArray(d.apps)],
 ];
 let failures = 0;
 for (const [path, valid] of checks) {

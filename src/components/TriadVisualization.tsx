@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Float, Environment, PerspectiveCamera, MeshTransmissionMaterial } from '@react-three/drei';
+import { OrbitControls, Float, MeshTransmissionMaterial } from '@react-three/drei';
 import * as THREE from 'three';
 
 const Pillar = ({ color, position, name }: { color: string, position: [number, number, number], name: string }) => {
@@ -67,27 +67,25 @@ export const TriadVisualization: React.FC = () => {
           </span>
         </div>
         <p className="font-mono text-[11px] text-slate-400">
-          Interaktywny model rezonansowy jądra: Alex (Infrastruktura), Astyria (Logika), Aurelius (Czas)
+          Wizualizacja ilustracyjna; nie jest pomiarem jądra ani aktywności agentów.
         </p>
       </div>
 
       <div className="absolute top-4 right-4 z-10 pointer-events-none hidden sm:flex items-center gap-2 font-mono text-[10px]">
         <span className="px-2.5 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300">
-          ALEX: 100% ONLINE
+          PROFIL: ALEX
         </span>
         <span className="px-2.5 py-1 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300">
-          ASTYRIA: 100% ONLINE
+          PROFIL: ASTYRIA
         </span>
         <span className="px-2.5 py-1 rounded-full bg-amber-950/80 border border-amber-500/40 text-amber-300">
-          AURELIUS: 100% ONLINE
+          PROFIL: AURELIUS
         </span>
       </div>
 
       <Canvas shadows camera={{ position: [0, 0, 7.5], fov: 48 }}>
         <OrbitControls enablePan={true} maxDistance={14} minDistance={3} autoRotate autoRotateSpeed={0.8} />
-        
-        <Environment preset="night" />
-        
+
         <Float speed={2.5} rotationIntensity={0.6} floatIntensity={0.8}>
           <TriadCore />
           <Pillar color="#10b981" position={[-2.4, 0, 0]} name="Alex" />

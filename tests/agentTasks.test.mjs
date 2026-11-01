@@ -7,15 +7,50 @@ import { agentTaskRegistry } from '../src/kernel/agentTasks.ts';
 test('AgentTaskRegistry: lists initial verified tasks with real artifacts', () => {
   const tasks = agentTaskRegistry.getAll();
   assert.ok(Array.isArray(tasks));
-  assert.ok(tasks.length > 0);
 
+  const syntheticTaskIds = new Set([
+    'task-bastilla-os-2-scaffold',
+    'task-system-snapshot-vm',
+    'task-sqlite-integrity-audit',
+    'task-ollama-runtime-check',
+  ]);
   for (const t of tasks) {
+    if (syntheticTaskIds.has(t.id)) assert.notEqual(t.status, 'completed');
     if (t.status === 'completed') {
       assert.ok(t.artifact, `Task ${t.id} completed must have artifact`);
       assert.ok(fs.existsSync(path.resolve(t.artifact.path)), `Artifact ${t.artifact.path} must exist on disk`);
+      assert.ok(fs.statSync(path.resolve(t.artifact.path)).isFile(), `Artifact ${t.artifact.path} must be a regular file`);
       assert.ok(t.artifact.sizeBytes >= 0, 'Artifact size must be non-negative');
     }
   }
+});
+
+test('AgentTaskRegistry: rejects unsupported actions and paths outside an app', async () => {
+  const request = {
+    agent: 'Alex',
+    title: 'Invalid task',
+    description: 'This request must be rejected before work is queued.',
+  };
+  await assert.rejects(
+    agentTaskRegistry.runTask({ ...request, actionType: 'invented_action' }),
+    /Nieobsługiwany typ zadania/,
+  );
+  await assert.rejects(
+    agentTaskRegistry.runTask({
+      ...request,
+      actionType: 'scaffold_app',
+      payload: { targetAppId: '../outside' },
+    }),
+    /Nieprawidłowy identyfikator aplikacji/,
+  );
+  await assert.rejects(
+    agentTaskRegistry.runTask({
+      ...request,
+      actionType: 'write_app_file',
+      payload: { appId: 'safe-app', filename: '../outside.txt' },
+    }),
+    /pojedynczą nazwą/,
+  );
 });
 
 test('AgentTaskRegistry: runs real action and produces verified artifact', async () => {

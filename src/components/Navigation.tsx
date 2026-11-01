@@ -218,18 +218,17 @@ export const Navigation: React.FC<NavigationProps> = ({
           <select
             aria-label="Pozostałe moduły BastillaOS"
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            value={['home', 'comms', 'terminal', 'apps'].includes(activeTab) ? '' : activeTab}
+            value={['home', 'comms', 'terminal', 'apps', 'integrations'].includes(activeTab) ? '' : activeTab}
             onChange={(event) => { if (event.target.value) onSelectTab(event.target.value as TabId); }}
           >
             <option value="" disabled>Wybierz moduł</option>
-            {tabs.filter((tab) => !['home', 'comms', 'terminal', 'apps'].includes(tab.id)).map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+            {tabs.filter((tab) => !['home', 'comms', 'terminal', 'apps', 'integrations'].includes(tab.id)).map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
           </select>
         </label>
       </div>
       <div className="hidden border-t border-blue-200/10 p-3 text-[9px] font-mono text-blue-200/40 lg:block">
-        BASTILLAOS · DEBIAN 13
+        BASTILLA OS 2 · WEB
       </div>
     </nav>
   );
 };
-
