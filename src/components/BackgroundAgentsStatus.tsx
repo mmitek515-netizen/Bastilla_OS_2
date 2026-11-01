@@ -4,7 +4,7 @@ import {
   AGENT_STATUS_LABELS,
   AGENT_STATUS_NAMES,
   AGENT_STATUS_STALE_AFTER_MS,
-} from '../lib/agentStatus.mjs';
+} from '../lib/agentStatusContract.mjs';
 
 type AgentName = typeof AGENT_STATUS_NAMES[number];
 type AgentState = keyof typeof AGENT_STATUS_LABELS;

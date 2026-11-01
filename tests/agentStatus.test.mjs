@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  AGENT_STATUS_NAMES,
-  AGENT_STATUS_LABELS,
   createAgentStatusSnapshot,
   registerAgentStatus,
 } from '../src/lib/agentStatus.mjs';
+import { AGENT_STATUS_NAMES, AGENT_STATUS_LABELS } from '../src/lib/agentStatusContract.mjs';
 
 const token = 'agent-status-test-token-0123456789';
 
