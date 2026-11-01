@@ -146,48 +146,48 @@ export const BastillaOS2View: React.FC = () => {
   });
 
   return (
-    <div className="flex flex-col min-h-0 flex-1 bg-[#FAF7F0] text-[#2A241E] overflow-y-auto">
-      {/* Header with Sentinel Aesthetic */}
-      <header className="border-b border-[#E6DCB8] bg-[#FAF7F0] px-6 py-4 sticky top-0 z-20 shadow-xs">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="bastilla-v2 flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#030712] text-slate-100">
+      <header className="sticky top-0 z-20 border-b border-cyan-900/50 bg-[#050b18]/95 px-3 py-3 shadow-lg shadow-cyan-950/20 backdrop-blur-xl sm:px-6 sm:py-4">
+        <div className="mx-auto flex w-full max-w-7xl flex-col justify-between gap-4 md:flex-row md:items-center">
           <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-[#DFB96C] via-[#C5A059] to-[#997A3D] flex items-center justify-center text-white shadow-sm ring-1 ring-[#997A3D]/30">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 via-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-200/30">
               <Shield className="w-6 h-6 stroke-[2]" />
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h1 className="text-lg font-bold tracking-tight text-[#1A1612]">BASTILLA OS 2</h1>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#FBF4DE] border border-[#D9C38B] text-[#7A5B18] tracking-wider uppercase">
-                  Ivory & Gold Sentinel
+                <h1 className="text-base font-bold tracking-[0.12em] text-slate-50 sm:text-lg">BASTILLA OS 2</h1>
+                <span className="rounded border border-cyan-700/50 bg-cyan-950/60 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-cyan-200">
+                  NEXUS · 02
                 </span>
               </div>
-              <p className="text-xs text-[#736758]">
-                Rzeczywisty rejestr zadań agentów · Weryfikacja artefaktów na dysku · Środowisko kontenera ~5 GiB RAM
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-400 sm:text-xs">
+                Interfejs operatorski · Pulpit, komunikacja i rejestr zadań
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => { setRunError(''); setIsModalOpen(true); }}
-              className="px-3.5 py-2 rounded-lg bg-gradient-to-r from-[#DFB96C] via-[#C5A059] to-[#997A3D] text-white text-xs font-semibold hover:brightness-105 active:scale-95 transition shadow-xs flex items-center gap-1.5"
+              className="flex min-h-10 items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-lg shadow-cyan-950/40 transition hover:brightness-110 active:scale-95"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
-              <span>Uruchom Zadanie Agenta</span>
+              <span>Nowe zadanie</span>
             </button>
             <a
               href="/api/apps/preview/bastilla_os_2/"
               target="_blank"
               rel="noreferrer"
-              className="px-3.5 py-2 rounded-lg border border-[#D9C38B] bg-white text-[#736758] hover:text-[#1A1612] hover:bg-[#F4EFE6] text-xs font-semibold transition flex items-center gap-1.5"
+              className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900/80 px-3.5 py-2 text-xs font-semibold text-slate-300 transition hover:border-cyan-700 hover:bg-slate-800 hover:text-white"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>Osobny Podgląd</span>
+              <span>Podgląd aplikacji</span>
             </a>
             <button
               onClick={() => void fetchTasks()}
-              className="p-2 rounded-lg border border-[#D9C38B] bg-white text-[#736758] hover:text-[#1A1612] hover:bg-[#F4EFE6] transition"
-              title="Odśwież rejestr"
+              className="flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-slate-700 bg-slate-900/80 text-slate-300 transition hover:border-cyan-700 hover:bg-slate-800 hover:text-white"
+              aria-label="Odśwież rejestr zadań"
+              title="Odśwież rejestr zadań"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
@@ -199,10 +199,10 @@ export const BastillaOS2View: React.FC = () => {
       <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6 flex-1">
         {/* Metric Cards Grid */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-4 rounded-xl bg-white border border-[#E6DCB8] shadow-xs flex flex-col justify-between">
+          <div className="p-4 rounded-xl bg-[#0b1425] border border-cyan-900/50 shadow-lg shadow-cyan-950/10 flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs text-[#736758]">
               <span className="font-semibold uppercase tracking-wider">Zadania w Rejestrze</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/60 text-amber-200 border border-amber-800/50">
                 Fizyczne
               </span>
             </div>
@@ -215,10 +215,10 @@ export const BastillaOS2View: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-white border border-[#E6DCB8] shadow-xs flex flex-col justify-between">
+          <div className="p-4 rounded-xl bg-[#0b1425] border border-cyan-900/50 shadow-lg shadow-cyan-950/10 flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs text-[#736758]">
               <span className="font-semibold uppercase tracking-wider">Aktywni Wykonawcy</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/60 text-emerald-200 border border-emerald-800/50">
                 Wątki w tle
               </span>
             </div>
@@ -231,26 +231,26 @@ export const BastillaOS2View: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-white border border-[#E6DCB8] shadow-xs flex flex-col justify-between">
+          <div className="p-4 rounded-xl bg-[#0b1425] border border-cyan-900/50 shadow-lg shadow-cyan-950/10 flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs text-[#736758]">
-              <span className="font-semibold uppercase tracking-wider">Ograniczenie RAM</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-blue-800 border border-blue-200">
-                Lokalny Linux
+              <span className="font-semibold uppercase tracking-wider">Zadania z błędem</span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-950/60 text-blue-200 border border-blue-800/50">
+                Rejestr
               </span>
             </div>
             <div className="mt-3 flex items-baseline justify-between">
-              <span className="text-2xl font-bold text-[#1A1612] font-mono tabular-nums">~5.0 GiB</span>
-              <span className="text-xs text-amber-700 font-medium">Brak qwen3:14b</span>
+              <span className="text-3xl font-extrabold text-[#1A1612] font-mono tabular-nums">{stats.failed}</span>
+              <span className="text-xs text-amber-700 font-medium">w rejestrze</span>
             </div>
             <div className="text-[11px] text-[#8C7E6D] mt-2 border-t border-[#F0EAE1] pt-2">
-              Brak fałszywych modeli przekraczających pamięć.
+              Błędy zgłoszone przez rejestr zadań.
             </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-white border border-[#E6DCB8] shadow-xs flex flex-col justify-between">
+          <div className="p-4 rounded-xl bg-[#0b1425] border border-cyan-900/50 shadow-lg shadow-cyan-950/10 flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs text-[#736758]">
               <span className="font-semibold uppercase tracking-wider">Aplikacja Bastilla OS 2</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-800 border border-purple-200">
+              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-violet-950/60 text-violet-200 border border-violet-800/50">
                 apps/bastilla_os_2
               </span>
             </div>
@@ -307,10 +307,10 @@ export const BastillaOS2View: React.FC = () => {
             <div className="divide-y divide-[#F0EAE1]">
               {filteredTasks.map((task) => {
                 const statusStyles = {
-                  completed: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-                  running: 'bg-amber-50 text-amber-800 border-amber-200 animate-pulse',
-                  queued: 'bg-blue-50 text-blue-800 border-blue-200',
-                  failed: 'bg-red-50 text-red-800 border-red-200',
+                  completed: 'bg-emerald-950/60 text-emerald-200 border-emerald-700/50',
+                  running: 'bg-amber-950/60 text-amber-200 border-amber-700/50 animate-pulse',
+                  queued: 'bg-blue-950/60 text-blue-200 border-blue-700/50',
+                  failed: 'bg-rose-950/60 text-rose-200 border-rose-700/50',
                 }[task.status];
 
                 const isRunning = task.status === 'running' || task.status === 'queued';
@@ -394,31 +394,29 @@ export const BastillaOS2View: React.FC = () => {
           )}
         </section>
 
-        {/* Live Embedded Iframe Preview */}
-        <section className="bg-white rounded-xl border border-[#E6DCB8] shadow-xs overflow-hidden">
-          <div className="p-4 border-b border-[#E6DCB8] flex items-center justify-between bg-[#FAF7F0]">
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-[#C5A059]" />
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[#1A1612]">
-                Podgląd na żywo prototypu Bastilla OS 2 (apps/bastilla_os_2)
+        <section className="flex flex-col gap-3 rounded-xl border border-cyan-900/50 bg-[#0b1425] p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="flex min-w-0 items-start gap-3">
+            <Layers className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-100">
+                Podgląd aplikacji Bastilla OS 2
               </h3>
+              <p className="mt-1 text-xs text-slate-400">
+                Otwórz prototyp w osobnej karcie, aby zachować miejsce na pulpit i zadania.
+              </p>
             </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
             <a
               href="/api/apps/preview/bastilla_os_2/"
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-[#997A3D] hover:underline font-semibold flex items-center gap-1"
+              className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs font-semibold text-cyan-200 transition hover:border-cyan-700 hover:bg-slate-800"
             >
-              <span>Pełny ekran w nowej karcie</span>
-              <ExternalLink className="w-3 h-3" />
+              <span>Otwórz podgląd</span>
+              <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </div>
-          <iframe
-            src="/api/apps/preview/bastilla_os_2/"
-            title="Bastilla OS 2 Prototype"
-            className="w-full h-[580px] border-0"
-            sandbox="allow-scripts allow-forms allow-same-origin allow-modals"
-          />
         </section>
       </main>
 

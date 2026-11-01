@@ -35,7 +35,7 @@ export const TAB_IDS: readonly TabId[] = [
 export function initialTabFromLocation(): TabId {
   try {
     const view = new URLSearchParams(window.location.search).get('view');
-    return view && (TAB_IDS as readonly string[]).includes(view) ? (view as TabId) : 'home';
+    return view && (TAB_IDS as readonly string[]).includes(view) ? (view as TabId) : 'bastilla_os_2';
   } catch {
     return 'home';
   }
@@ -178,7 +178,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       badge: 'GIT'
     }
   ];
-  const mobileLabels: Partial<Record<TabId, string>> = { home: 'Pulpit', comms: 'Czat', terminal: 'Terminal', apps: 'Aplikacje', integrations: 'Integracje' };
+  const mobileLabels: Partial<Record<TabId, string>> = { home: 'System', bastilla_os_2: 'Zadania', comms: 'Czat', terminal: 'Terminal', apps: 'Aplikacje', integrations: 'Integracje' };
 
   return (
     <nav aria-label="Nawigacja BastillaOS" className="app-navigation order-last flex w-full shrink-0 flex-row border-t border-blue-200/10 bg-[#07101e] lg:order-first lg:h-auto lg:w-60 lg:flex-col lg:border-r lg:border-t-0">
@@ -197,7 +197,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
               onClick={() => onSelectTab(tab.id)}
-              className={`group relative min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center transition-all duration-200 lg:min-h-11 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-left ${['home', 'comms', 'terminal', 'apps', 'integrations'].includes(tab.id) ? 'flex' : 'hidden lg:flex'} ${
+              className={`group relative min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center transition-all duration-200 lg:min-h-11 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-left ${['home', 'bastilla_os_2', 'comms', 'terminal', 'apps'].includes(tab.id) ? 'flex' : 'hidden lg:flex'} ${
                 isActive
                   ? 'border border-cyan-300/15 bg-cyan-950/50 text-cyan-100 shadow-[inset_2px_0_0_#67e8f9,0_4px_18px_rgba(8,145,178,0.08)]'
                   : 'border border-transparent text-slate-400 hover:bg-blue-950/50 hover:text-blue-100'
@@ -218,11 +218,11 @@ export const Navigation: React.FC<NavigationProps> = ({
           <select
             aria-label="Pozostałe moduły BastillaOS"
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-            value={['home', 'comms', 'terminal', 'apps'].includes(activeTab) ? '' : activeTab}
+            value={['home', 'bastilla_os_2', 'comms', 'terminal', 'apps'].includes(activeTab) ? '' : activeTab}
             onChange={(event) => { if (event.target.value) onSelectTab(event.target.value as TabId); }}
           >
             <option value="" disabled>Wybierz moduł</option>
-            {tabs.filter((tab) => !['home', 'comms', 'terminal', 'apps'].includes(tab.id)).map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+            {tabs.filter((tab) => !['home', 'bastilla_os_2', 'comms', 'terminal', 'apps'].includes(tab.id)).map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
           </select>
         </label>
       </div>
@@ -232,4 +232,3 @@ export const Navigation: React.FC<NavigationProps> = ({
     </nav>
   );
 };
-

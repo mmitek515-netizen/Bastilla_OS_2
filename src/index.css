@@ -58,6 +58,57 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
 
+.bastilla-v2 {
+  background:
+    radial-gradient(ellipse at 82% 0%, rgba(8, 145, 178, 0.12), transparent 34rem),
+    radial-gradient(ellipse at 0% 75%, rgba(91, 33, 182, 0.09), transparent 30rem),
+    #030712;
+}
+.bastilla-v2 [class*="bg-white"],
+.bastilla-v2 [class*="bg-[#FAF7F0]"],
+.bastilla-v2 [class*="bg-[#FBF4DE]"],
+.bastilla-v2 [class*="bg-amber-50"],
+.bastilla-v2 [class*="bg-emerald-50"],
+.bastilla-v2 [class*="bg-blue-50"],
+.bastilla-v2 [class*="bg-red-50"] {
+  background-color: #0b1425 !important;
+}
+.bastilla-v2 [class*="border-[#E6DCB8]"],
+.bastilla-v2 [class*="border-[#D9C38B]"],
+.bastilla-v2 [class*="border-[#F0EAE1]"] {
+  border-color: rgba(34, 211, 238, 0.2) !important;
+}
+.bastilla-v2 [class*="divide-[#F0EAE1]"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(34, 211, 238, 0.16) !important;
+}
+.bastilla-v2 [class*="text-[#1A1612]"],
+.bastilla-v2 [class*="text-[#2A241E]"],
+.bastilla-v2 [class*="text-[#241E18]"],
+.bastilla-v2 [class*="text-[#40382E]"] {
+  color: #e2e8f0 !important;
+}
+.bastilla-v2 [class*="text-[#736758]"],
+.bastilla-v2 [class*="text-[#594E3F]"],
+.bastilla-v2 [class*="text-[#8C7E6D]"] {
+  color: #94a3b8 !important;
+}
+.bastilla-v2 [class*="text-[#7A5B18]"] {
+  color: #fcd34d !important;
+}
+.bastilla-v2 [class*="from-[#DFB96C]"] {
+  background-image: linear-gradient(to right, #06b6d4, #2563eb) !important;
+}
+.bastilla-v2 [class*="hover:bg-[#FAF7F0]"]:hover,
+.bastilla-v2 [class*="hover:bg-[#F4EFE6]"]:hover {
+  background-color: rgba(8, 145, 178, 0.12) !important;
+}
+.bastilla-v2 [class*="bg-emerald-50"] { color: #a7f3d0 !important; }
+.bastilla-v2 [class*="bg-amber-50"] { color: #fde68a !important; }
+.bastilla-v2 [class*="bg-blue-50"] { color: #bfdbfe !important; }
+.bastilla-v2 [class*="bg-red-50"] { color: #fecaca !important; }
+.bastilla-v2 code { overflow-wrap: anywhere; }
+.bastilla-v2 :focus-visible { outline-color: #67e8f9; }
+
 /* Subtle futuristic background cyber-grid */
 .cyber-grid {
   background-size: 32px 32px;
@@ -172,5 +223,4 @@ input, select, textarea {
 .animate-neon-pulse {
   animation: neonPulse 2.5s infinite ease-in-out;
 }
-
 
