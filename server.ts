@@ -6338,6 +6338,10 @@ app.post('/api/kernel/agent', (_req, res) => {
 // ============================================================================
 
 const agentTasksToken = (process.env.BASTILLA_AGENT_TASKS_TOKEN || '').trim();
+const TASK_DECISION_WINDOW_MS = 60_000;
+let taskDecisionWindowStartedAt = 0;
+let taskDecisionRequestCount = 0;
+
 function authorizeAgentTasks(req: express.Request, res: express.Response): boolean {
   if (!agentTasksToken) {
     res.status(503).json({ success: false, error: 'Ustaw BASTILLA_AGENT_TASKS_TOKEN, aby włączyć operacje na zadaniach agentów.' });
@@ -6349,6 +6353,29 @@ function authorizeAgentTasks(req: express.Request, res: express.Response): boole
   }
   return true;
 }
+
+function allowAgentTaskDecision(res: express.Response): boolean {
+  const now = Date.now();
+  if (now - taskDecisionWindowStartedAt >= TASK_DECISION_WINDOW_MS) {
+    taskDecisionWindowStartedAt = now;
+    taskDecisionRequestCount = 0;
+  }
+  if (taskDecisionRequestCount >= 30) {
+    res.setHeader('Retry-After', String(Math.ceil((TASK_DECISION_WINDOW_MS - (now - taskDecisionWindowStartedAt)) / 1000)));
+    res.status(429).json({ success: false, error: 'Za dużo decyzji dotyczących zadań. Spróbuj ponownie za chwilę.' });
+    return false;
+  }
+  taskDecisionRequestCount += 1;
+  return true;
+}
+
+const requireAgentTasksAuthorization: express.RequestHandler = (req, res, next) => {
+  if (authorizeAgentTasks(req, res)) next();
+};
+
+const agentTaskDecisionRateLimit: express.RequestHandler = (_req, res, next) => {
+  if (allowAgentTaskDecision(res)) next();
+};
 
 app.get('/api/agent-tasks', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -6435,8 +6462,7 @@ app.post('/api/agent-tasks/cancel', (req, res) => {
   return res.json({ success });
 });
 
-app.post('/api/agent-tasks/:id/approve', (req, res) => {
-  if (!authorizeAgentTasks(req, res)) return;
+app.post('/api/agent-tasks/:id/approve', requireAgentTasksAuthorization, agentTaskDecisionRateLimit, (req, res) => {
   const success = agentTaskRegistry.approve(req.params.id);
   return res.status(success ? 200 : 409).json({
     success,
@@ -6444,8 +6470,7 @@ app.post('/api/agent-tasks/:id/approve', (req, res) => {
   });
 });
 
-app.post('/api/agent-tasks/:id/retry', (req, res) => {
-  if (!authorizeAgentTasks(req, res)) return;
+app.post('/api/agent-tasks/:id/retry', requireAgentTasksAuthorization, agentTaskDecisionRateLimit, (req, res) => {
   const success = agentTaskRegistry.retry(req.params.id);
   return res.status(success ? 200 : 409).json({
     success,
