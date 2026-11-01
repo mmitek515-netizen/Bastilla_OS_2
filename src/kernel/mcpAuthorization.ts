@@ -3,6 +3,27 @@ import { timingSafeEqual } from 'node:crypto';
 const READ_ONLY_MCP_TOOLS = new Set(['kernel_status']);
 const MIN_TOKEN_LENGTH = 32;
 
+export function createMcpRateLimiter(limit = 120, windowMs = 60000, maxClients = 10000) {
+  const clients = new Map<string, { count: number; resetAt: number }>();
+  return (client: string, now = Date.now()): boolean => {
+    const bucket = clients.get(client);
+    if (bucket && now < bucket.resetAt) {
+      if (bucket.count >= limit) return false;
+      bucket.count += 1;
+      return true;
+    }
+
+    if (clients.size >= maxClients) {
+      for (const [key, value] of clients) {
+        if (now >= value.resetAt) clients.delete(key);
+      }
+      if (clients.size >= maxClients) return false;
+    }
+    clients.set(client, { count: 1, resetAt: now + windowMs });
+    return true;
+  };
+}
+
 export function isMcpToolAuthorized(
   toolName: unknown,
   authorization: string | undefined,

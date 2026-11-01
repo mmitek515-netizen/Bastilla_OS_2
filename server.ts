@@ -41,7 +41,7 @@ import {
   TRIAD_AGENT_NAMES,
   validateAgentProtocolRequest,
 } from './src/kernel/agentProtocol';
-import { isMcpToolAuthorized } from './src/kernel/mcpAuthorization';
+import { createMcpRateLimiter, isMcpToolAuthorized } from './src/kernel/mcpAuthorization';
 import {
   ChatApprovalAction,
   ChatApprovalCommand,
@@ -6256,6 +6256,7 @@ app.get('/api/mcp/openapi.json', (req, res) => {
 });
 
 // MCP JSON-RPC 2.0 endpoint (ChatGPT / Claude / Cursor MCP)
+const allowMcpRequest = createMcpRateLimiter();
 app.all(['/api/mcp', '/mcp'], async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -6263,6 +6264,14 @@ app.all(['/api/mcp', '/mcp'], async (req, res) => {
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
+  }
+
+  if (!allowMcpRequest(req.socket.remoteAddress || 'unknown')) {
+    return res.status(429).json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32000, message: 'MCP request limit exceeded; retry after one minute.' },
+    });
   }
 
   if (req.method === 'GET') {
@@ -6666,4 +6675,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
