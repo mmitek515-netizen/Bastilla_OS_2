@@ -25,7 +25,8 @@ test('rejects duplicate event ID and stale revision', () => {
   const bus = new LocalSyncBus();
   assert.equal(bus.publish(event()), true);
   assert.equal(bus.publish(event()), false);
-  assert.equal(bus.publish(event({ id: 'event-stale', revision: 0 })), false);
+  assert.equal(bus.publish(event({ id: 'event-new', revision: 2 })), true);
+  assert.equal(bus.publish(event({ id: 'event-stale', revision: 1 })), false);
 });
 
 test('allows distinct phase events for same revision and isolates projects', () => {
