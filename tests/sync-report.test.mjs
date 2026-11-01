@@ -7,7 +7,7 @@ const { buildSyncReport, formatSyncReport } = await import('../src/lib/syncRepor
 test('fresh kernel read does not imply external sync success', () => {
   const report = buildSyncReport(true);
   assert.equal(report.length, 12);
-  assert.deepEqual(report.filter(c => c.state === 'confirmed').map(c => c.domain), ['chat', 'agents']);
+  assert.deepEqual(report.filter(c => c.state === 'confirmed').map(c => c.domain), ['chat']);
   assert.equal(report.find(c => c.domain === 'github').state, 'unavailable');
   assert.equal(report.find(c => c.domain === 'databases').state, 'unavailable');
   assert.match(formatSyncReport(report), /2\/12/);
