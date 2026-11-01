@@ -1,7 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { register } from 'node:module';
-register('tsx', import.meta.url);
 const { buildSyncReport, formatSyncReport } = await import('../src/lib/syncReport.ts');
 
 test('fresh kernel read does not imply external sync success', () => {
