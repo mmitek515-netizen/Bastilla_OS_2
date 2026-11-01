@@ -411,6 +411,51 @@ export default function App() {
     setIsAgentLoading(true);
     setAgentError(null);
     try {
+      if (attachments.length === 0 && !message.trim().startsWith('/') && !['napraw to', 'napraw czat', 'pelna naprawa czatu', 'odpowiedz pelna naprawa czatu'].includes(message.trim().toLocaleLowerCase('pl-PL'))) {
+        const controller = new AbortController();
+        streamingControllerRef.current = controller;
+        setStreamedReply('');
+        const total = chatAgent === 'triad' ? 4 : 1;
+        let completedAgents = 0;
+        setStreamProgress({ completed: 0, total, label: 'Oczekiwanie na obliczenia agentów' });
+        const response = await fetch('/api/triad/message/without-nlp-stream', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, agent: chatAgent }), signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error('Nie udało się uruchomić strumienia bez NLP.');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let combined = '';
+        let saved = false;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line) as { type: string; agent?: string; text?: string; error?: string; state?: {store: unknown} };
+            if (event.type === 'started') setStreamProgress({ completed: completedAgents, total, label: 'Oblicza: ' + (event.agent === 'si_1' ? 'Aria' : event.agent || 'agent') });
+            if (event.type === 'agent_reply' && event.text) {
+              completedAgents++;
+              combined += (combined ? '\n\n' : '') + (chatAgent === 'triad' ? event.agent + ':\n' : '') + event.text;
+              setStreamedReply(combined);
+              setStreamProgress({ completed: completedAgents, total, label: 'Zakończono obliczenia: ' + completedAgents + '/' + total });
+            }
+            if (event.type === 'error') throw new Error(event.error || 'Błąd silnika bez NLP.');
+            if (event.type === 'done') {
+              const normalized = normalizeDataStore(event.state?.store);
+              setDataStore(normalized);
+              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(normalized));
+              saved = true;
+            }
+          }
+        }
+        if (!saved) throw new Error('Nie potwierdzono zapisu historii czatu.');
+        return;
+      }
       const normalizedCommand = message
         .trim()
         .normalize('NFD')
