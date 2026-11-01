@@ -32,7 +32,7 @@ export const ASTYRIA_MISSION_LABELS: Record<AstyriaMissionAction, string> = {
 };
 
 export type AgentProtocolCommand = (typeof AGENT_PROTOCOL_COMMANDS)[number];
-export const TRIAD_AGENT_NAMES = ['Alex', 'Astyria', 'si_1', 'Aurelius'] as const;
+export const TRIAD_AGENT_NAMES = ['Alex', 'Astyria', 'Aria', 'Aurelius'] as const;
 export type TriadAgentName = (typeof TRIAD_AGENT_NAMES)[number];
 
 export interface AgentProtocolPayload {
@@ -56,7 +56,7 @@ export function parseChatProtocolCommand(
   let commandText = trimmed;
 
   const targetedCommand = trimmed.match(
-    /^\/agent\s+(triad|Alex|Astyria|Aurelius|si_1|Aria)\s+(status|audit|history|SYSTEM_STATUS|DATA_STORE_AUDIT|VERSION_TIMELINE)$/i,
+    /^\/agent\s+(triad|Alex|Astyria|Aurelius|Aria|si_1)\s+(status|audit|history|SYSTEM_STATUS|DATA_STORE_AUDIT|VERSION_TIMELINE)$/i,
   );
   if (targetedCommand) {
     const target = targetedCommand[1].toLowerCase();
@@ -68,7 +68,7 @@ export function parseChatProtocolCommand(
       ? 'Astyria'
       : target === 'aurelius'
       ? 'Aurelius'
-      : 'si_1';
+      : 'Aria';
     commandText = targetedCommand[2];
   } else {
     const directCommand = trimmed.match(/^(?:\/command\s+)?(SYSTEM_STATUS|DATA_STORE_AUDIT|VERSION_TIMELINE)$/i);
@@ -129,7 +129,7 @@ export function isAgentProtocolCommand(value: unknown): value is AgentProtocolCo
 }
 
 export function isTriadAgent(value: unknown): value is TriadAgentName {
-  return value === 'Alex' || value === 'Astyria' || value === 'Aurelius' || value === 'si_1';
+  return value === 'Alex' || value === 'Astyria' || value === 'Aurelius' || value === 'Aria';
 }
 
 export function validateAgentProtocolRequest(value: unknown): AgentProtocolValidation {
@@ -144,7 +144,8 @@ export function validateAgentProtocolRequest(value: unknown): AgentProtocolValid
   if (!isAgentProtocolCommand(input.command)) {
     return { valid: false, error: 'Unknown command.' };
   }
-  if (!(AGENT_PROTOCOL_AGENTS as readonly unknown[]).includes(input.agent)) {
+  const canonicalAgent = input.agent === 'si_1' ? 'Aria' : input.agent;
+  if (!(AGENT_PROTOCOL_AGENTS as readonly unknown[]).includes(canonicalAgent)) {
     return { valid: false, error: 'Unknown agent.' };
   }
 
