@@ -78,6 +78,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>(initialTabFromLocation);
   const [isAgentLoading, setIsAgentLoading] = useState(false);
   const [streamedReply, setStreamedReply] = useState('');
+  const [streamProgress, setStreamProgress] = useState<{ completed: number; total: number; label: string } | null>(null);
   const streamingControllerRef = useRef<AbortController | null>(null);
   const [terminalBusy, setTerminalBusy] = useState(false);
   const terminalPendingRef = useRef(0);
@@ -311,6 +312,7 @@ export default function App() {
     setIsAgentLoading(true);
     setAgentError(null);
     setStreamedReply('');
+    setStreamProgress(null);
     try {
       if (attachments.length === 0 && !message.trim().startsWith('/')) {
         const controller = new AbortController();
@@ -325,6 +327,9 @@ export default function App() {
         let buffer = '';
         let completed = false;
         let combined = '';
+        let completedAgents = 0;
+        const totalAgents = chatAgent === 'triad' ? 4 : 1;
+        setStreamProgress({ completed: 0, total: totalAgents, label: 'Oczekiwanie na obliczenia agentów' });
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -334,7 +339,10 @@ export default function App() {
           for (const line of lines) {
             if (!line.trim()) continue;
             const event = JSON.parse(line) as {type: string; agent?: string; text?: string; error?: string; state?: {store: unknown}};
+            if (event.type === 'started') setStreamProgress({ completed: completedAgents, total: totalAgents, label: `Oblicza: ${event.agent === 'si_1' ? 'Aria' : event.agent || 'agent'}` });
             if (event.type === 'agent_reply' && event.text) {
+              completedAgents += 1;
+              setStreamProgress({ completed: completedAgents, total: totalAgents, label: `Zakończono obliczenia: ${completedAgents} z ${totalAgents}` });
               combined += (combined ? '\n\n' : '') + (chatAgent === 'triad' ? event.agent + ':\n' : '') + event.text;
               setStreamedReply(combined);
             }
@@ -469,6 +477,7 @@ export default function App() {
     } finally {
       streamingControllerRef.current = null;
       setStreamedReply('');
+      setStreamProgress(null);
       setIsAgentLoading(false);
     }
   };
@@ -581,6 +590,7 @@ export default function App() {
               isLoading={isAgentLoading}
               sendError={agentError}
               streamedReply={streamedReply}
+              streamProgress={streamProgress}
               onStopGeneration={() => streamingControllerRef.current?.abort()}
               onClearHistory={handleClearHistory}
               onForceSync={handleForceSync}
