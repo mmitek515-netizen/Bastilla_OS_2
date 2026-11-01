@@ -3,6 +3,13 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 const AGENTS = ['Aria', 'Alex', 'Astyria', 'Aurelius'];
 const digest = (text) => createHash('sha256').update(text).digest();
 
+export function isGptActionsRouteAllowed(method, path) {
+  if (method === 'GET') {
+    return ['/api/gpt-actions/setup', '/api/gpt-actions/openapi.json', '/api/gpt-actions/status'].includes(path);
+  }
+  return method === 'POST' && path === '/api/gpt-actions/message';
+}
+
 export function gptActionsSchema(origin) {
   const url = new URL(origin);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
@@ -44,11 +51,20 @@ export function gptActionsSchema(origin) {
 }
 
 // Dependencies are injected so this API never enters the terminal/auto-execution chat path.
-export function registerGptActions(app, { chat, providers, env = process.env, timeoutMs = 40000 }) {
+export function registerGptActions(app, {
+  chat,
+  providers,
+  env = process.env,
+  timeoutMs = 40000,
+  rateLimit = 30,
+  rateLimitWindowMs = 60000,
+}) {
   const token = (env.GPT_ACTIONS_TOKEN || '').trim();
   let schema;
   try { schema = gptActionsSchema((env.GPT_ACTIONS_PUBLIC_URL || '').trim()); } catch {}
   let active = 0;
+  let modelResponseObserved = false;
+  const requestTimestamps = [];
   app.get('/api/gpt-actions/setup', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const current = providers();
@@ -62,6 +78,7 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
       agents: AGENTS,
       readyForExternalTest: Boolean(schema && token.length >= 32 && current.length),
       externalConnectionVerified: false,
+      modelResponseObserved,
     });
   });
   const authorize = (req, res, next) => {
@@ -88,6 +105,14 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
       return res.status(400).json({ error: 'Supply message (1–12000 characters) and an optional supported agent.' });
     }
     if (!providers().length) return res.status(503).json({ error: 'No AI provider configured.' });
+    const now = Date.now();
+    while (requestTimestamps.length && requestTimestamps[0] <= now - rateLimitWindowMs) requestTimestamps.shift();
+    if (requestTimestamps.length >= rateLimit) {
+      const retryAfter = Math.max(1, Math.ceil((requestTimestamps[0] + rateLimitWindowMs - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({ error: 'Request rate limit reached. Retry later.' });
+    }
+    requestTimestamps.push(now);
     if (active >= 2) return res.status(429).json({ error: 'Two requests are already running. Retry later.' });
     active++;
     const controller = new AbortController();
@@ -99,6 +124,7 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
       const agent = body.agent ?? 'Aria';
       const result = await Promise.race([chat(agent, body.message.trim(), controller.signal), deadline]);
       if (!result || typeof result.text !== 'string' || !result.text.trim()) throw new Error('empty reply');
+      modelResponseObserved = true;
       return res.json({ success: true, agent, reply: result.text.slice(0, 12000), engine: `${result.provider}:${result.model}`, truncated: result.text.length > 12000 });
     } catch {
       return res.status(controller.signal.aborted ? 504 : 502).json({ error: controller.signal.aborted ? 'AI request timed out. It was not retried.' : 'AI provider failed. Check server logs/configuration.' });
@@ -108,4 +134,3 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
     }
   });
 }
-

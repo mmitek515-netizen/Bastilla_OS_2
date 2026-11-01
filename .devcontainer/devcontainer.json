@@ -14,7 +14,8 @@
   "portsAttributes": {
     "3000": {
       "label": "Bastilla OS 2",
-      "onAutoForward": "notify"
+      "onAutoForward": "notify",
+      "visibility": "private"
     }
   },
   "customizations": {

@@ -1,5 +1,5 @@
 import express from 'express';
-import { registerGptActions } from './src/lib/gptActions.mjs';
+import { isGptActionsRouteAllowed, registerGptActions } from './src/lib/gptActions.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
@@ -150,6 +150,16 @@ const POLLINATIONS_API_KEY = rawEnvPollKey.startsWith('sk_')
   ? rawEnvPollKey
   : '';
 const app = express();
+const gptActionsOnly = /^(1|true|yes|on)$/i.test((process.env.GPT_ACTIONS_ONLY || '').trim())
+  || Boolean((process.env.GPT_ACTIONS_PUBLIC_URL || '').trim());
+if (gptActionsOnly) {
+  app.use((req, res, next) => {
+    if (!isGptActionsRouteAllowed(req.method, req.path)) {
+      return res.status(404).json({ error: 'Not found.' });
+    }
+    next();
+  });
+}
 const portArgIndex = process.argv.indexOf('--port');
 const DEFAULT_PORT = Number(portArgIndex >= 0 ? process.argv[portArgIndex + 1] : process.env.PORT || 3000);
 const PORT = Number.isFinite(DEFAULT_PORT) && DEFAULT_PORT > 0 ? DEFAULT_PORT : 3000;
@@ -6629,5 +6639,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
 

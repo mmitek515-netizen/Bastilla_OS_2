@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gptActionsSchema, registerGptActions } from '../src/lib/gptActions.mjs';
+import { gptActionsSchema, isGptActionsRouteAllowed, registerGptActions } from '../src/lib/gptActions.mjs';
 
 const token = 'test-token-012345678901234567890123456789';
 function harness(options = {}) {
@@ -35,11 +35,28 @@ test('OpenAPI uses configured HTTPS origin and supported agent operations', asyn
   for (const origin of ['http://host', 'https://user:pass@host', 'https://host/path', 'https://host/?token=secret']) assert.throws(() => gptActionsSchema(origin));
   assert.throws(() => gptActionsSchema('https://ais-dev-example-123.europe-west2.run.app'));
 });
+test('restricted public mode allows only the intended GPT Actions paths and methods', () => {
+  for (const [method, path] of [
+    ['GET', '/api/gpt-actions/setup'],
+    ['GET', '/api/gpt-actions/openapi.json'],
+    ['GET', '/api/gpt-actions/status'],
+    ['POST', '/api/gpt-actions/message'],
+  ]) assert.equal(isGptActionsRouteAllowed(method, path), true);
+  for (const [method, path] of [
+    ['POST', '/api/kernel/command'],
+    ['GET', '/api/kernel/state'],
+    ['POST', '/api/mcp'],
+    ['GET', '/api/gpt-actions/message'],
+    ['PUT', '/api/gpt-actions/message'],
+    ['GET', '/api/gpt-actions/status/'],
+  ]) assert.equal(isGptActionsRouteAllowed(method, path), false);
+});
 test('setup diagnoses missing settings without disclosing the token or claiming a live connection', async () => {
   const h = harness();
   const r = await h.request('get', 'setup');
   assert.equal(r.body.readyForExternalTest, true);
   assert.equal(r.body.externalConnectionVerified, false);
+  assert.equal(r.body.modelResponseObserved, false);
   assert.ok(!JSON.stringify(r.body).includes(token));
   const missing = await harness({ env: {}, providers: () => [] }).request('get', 'setup');
   assert.equal(missing.body.readyForExternalTest, false);
@@ -103,4 +120,18 @@ test('response is bounded; concurrent overload is rejected', async () => {
   for (const resolve of resolvers) resolve({ text: 'OK', provider: 'ollama', model: 'local' });
   await Promise.all([first, second]);
 });
-
+test('message request rate is limited and reports a retry interval', async () => {
+  const h = harness({ rateLimit: 1 });
+  assert.equal((await h.request('post', 'message', { message: 'first' })).code, 200);
+  const limited = await h.request('post', 'message', { message: 'second' });
+  assert.equal(limited.code, 429);
+  assert.ok(Number(limited.headers['Retry-After']) > 0);
+  assert.equal(h.calls.length, 1);
+});
+test('setup reports an observed model reply only after successful inference', async () => {
+  const h = harness();
+  assert.equal((await h.request('get', 'setup')).body.modelResponseObserved, false);
+  assert.equal((await h.request('post', 'message', { message: 'test' })).code, 200);
+  assert.equal((await h.request('get', 'setup')).body.modelResponseObserved, true);
+  assert.equal((await harness({ chat: async () => { throw new Error('provider failed'); } }).request('get', 'setup')).body.modelResponseObserved, false);
+});

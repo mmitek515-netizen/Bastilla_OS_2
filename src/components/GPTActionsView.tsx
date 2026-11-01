@@ -9,6 +9,8 @@ interface Setup {
   providers: string[];
   agents: string[];
   readyForExternalTest: boolean;
+  externalConnectionVerified: boolean;
+  modelResponseObserved: boolean;
 }
 
 export function GPTActionsView() {
@@ -16,6 +18,7 @@ export function GPTActionsView() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [httpsReachable, setHttpsReachable] = useState(false);
   const refresh = async (signal?: AbortSignal) => {
     setLoading(true);
     setError('');
@@ -25,6 +28,7 @@ export function GPTActionsView() {
       const data = await response.json();
       if (!Array.isArray(data.agents)) throw new Error('Serwer zwrócił nieprawidłową diagnostykę. Odśwież aplikację po wdrożeniu.');
       setSetup(data);
+      setHttpsReachable(window.location.protocol === 'https:');
     } catch (e) {
       if (!signal?.aborted) setError(e instanceof Error ? e.message : 'Nie można połączyć się z serwerem.');
     } finally { if (!signal?.aborted) setLoading(false); }
@@ -53,12 +57,20 @@ export function GPTActionsView() {
         {loading && !setup && <p role="status">Sprawdzanie serwera…</p>}
         {setup && <>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
-            <h2 className="mb-3 font-semibold">Konfiguracja serwera</h2>
+            <h2 className="mb-3 font-semibold">Diagnostyka połączenia</h2>
+            <ul className="mb-4 space-y-3 text-sm">
+              {[
+                [setup.readyForExternalTest, 'Konfiguracja serwera'],
+                [httpsReachable, 'HTTPS działa w tej przeglądarce'],
+                [setup.modelResponseObserved, 'Model odpowiedział przez GPT Actions'],
+                [setup.externalConnectionVerified, 'ChatGPT połączony'],
+              ].map(([ok, label]) => <li key={String(label)} className="flex items-center gap-2">{ok ? <Check className="h-4 w-4 shrink-0 text-emerald-400" /> : <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />}<span>{label}: <strong>{ok ? 'potwierdzono' : 'niepotwierdzono'}</strong></span></li>)}
+            </ul>
             <ul className="space-y-3 text-sm">
               {[[setup.publicUrlConfigured, 'Publiczny adres HTTPS'], [setup.tokenConfigured, 'Token API (minimum 32 znaki)'], [setup.providerConfigured, 'Skonfigurowany dostawca AI']].map(([ok, label]) => <li key={String(label)} className="flex items-center gap-2">{ok ? <Check className="h-4 w-4 shrink-0 text-emerald-400" /> : <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />}<span>{label}: <strong>{ok ? 'ustawiono' : 'brak'}</strong></span></li>)}
             </ul>
             <p className="mt-4 text-sm text-slate-300">{setup.readyForExternalTest ? 'Konfiguracja gotowa do testu w edytorze GPT.' : 'Uzupełnij brakujące ustawienia w sekretach serwera i uruchom aplikację ponownie.'}</p>
-            <p className="mt-2 text-xs text-slate-400">Ten ekran nie potwierdza połączenia z ChatGPT ani odpowiedzi modelu. Potwierdzi je dopiero udany test Action.</p>
+            <p className="mt-2 text-xs text-slate-400">HTTPS dotyczy połączenia tej przeglądarki z serwerem. Odpowiedź modelu pojawi się po udanym Action; ten ekran nie może sam potwierdzić połączenia z ChatGPT.</p>
           </div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
             <h2 className="mb-3 font-semibold">Dodaj do własnego GPT</h2>
