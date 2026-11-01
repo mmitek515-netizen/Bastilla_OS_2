@@ -67,7 +67,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   const [showActivity, setShowActivity] = useState(true);
   const [activityElapsed, setActivityElapsed] = useState(0);
   useEffect(() => {
-    if (!isLoading) { setActivityStartedAt(null); setActivityElapsed(0); return; }
+    if (!isLoading) { setActivityElapsed(0); return; }
     const started = Date.now();
     const interval = window.setInterval(() => setActivityElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => window.clearInterval(interval);
