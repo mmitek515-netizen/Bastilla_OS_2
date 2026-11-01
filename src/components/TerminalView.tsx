@@ -254,6 +254,7 @@ const TerminalInputBar = React.memo(({ onExecute, history, antiMirrorActive, onT
           <input
             ref={inputRef}
             type="text"
+            aria-label="Polecenie terminala"
             value={cmdText}
             onChange={(e) => setCmdText(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -296,6 +297,7 @@ const TerminalInputBar = React.memo(({ onExecute, history, antiMirrorActive, onT
                   setCmdText('');
                   inputRef.current?.focus();
                 }}
+                aria-label="Wyczyść polecenie"
                 className="text-slate-500 hover:text-slate-300 p-1 cursor-pointer text-xs"
                 title="Wyczyść wpis"
               >
@@ -695,6 +697,7 @@ Integralność tagów:  ZGODNA (<<<DATA_STORE_START>>> ... <<<DATA_STORE_END>>>)
               </button>
               <button
                 onClick={(e) => handleRemoveCmd(i, e)}
+                aria-label={`Usuń szybkie polecenie ${cmd}`}
                 className="text-slate-500 hover:text-rose-400 opacity-60 group-hover:opacity-100 cursor-pointer ml-0.5 text-[10px]"
                 title="Usuń polecenie"
               >
@@ -746,6 +749,7 @@ Integralność tagów:  ZGODNA (<<<DATA_STORE_START>>> ... <<<DATA_STORE_END>>>)
 
           <button
             onClick={() => handleExecute('clear')}
+            aria-label="Wyczyść konsolę"
             className="px-1.5 sm:px-2 py-0.5 rounded hover:bg-red-950/40 text-slate-400 hover:text-red-400 cursor-pointer shrink-0"
             title="Wyczyść konsolę"
           >
@@ -757,6 +761,8 @@ Integralność tagów:  ZGODNA (<<<DATA_STORE_START>>> ... <<<DATA_STORE_END>>>)
       {/* Terminal Output Area */}
       <div
         dir="ltr"
+        role="log"
+        aria-label="Wyjście terminala"
         style={{ direction: 'ltr', textAlign: 'left' }}
         className="flex-1 min-h-0 min-w-0 overflow-y-auto p-4 space-y-2 select-text"
       >
@@ -777,4 +783,3 @@ Integralność tagów:  ZGODNA (<<<DATA_STORE_START>>> ... <<<DATA_STORE_END>>>)
     </div>
   );
 };
-

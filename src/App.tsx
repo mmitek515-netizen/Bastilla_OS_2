@@ -489,7 +489,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div className="flex min-h-dvh min-w-0 max-w-full flex-col overflow-x-hidden bg-[#050b18] font-sans text-slate-100 selection:bg-cyan-400/30 selection:text-cyan-100">
+      <div className="app-shell flex min-h-dvh min-w-0 max-w-full flex-col overflow-x-hidden bg-[#050b18] font-sans text-slate-100 selection:bg-cyan-400/30 selection:text-cyan-100">
         <Header
           dataStore={dataStore}
           onReset={handleResetToDefault}
@@ -511,7 +511,7 @@ export default function App() {
             versionCount={dataStore?.update_history?.length || 0}
           />
 
-        <main className={`flex min-w-0 flex-1 flex-col overflow-x-hidden ${activeTab === 'comms' || activeTab === 'terminal' ? 'min-h-[75dvh] w-full lg:min-h-[calc(100dvh-7rem)]' : 'min-h-0'}`}>
+        <main className="app-main flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
           {activeTab === 'home' && <SystemResourceMeters />}
           {activeTab === 'home' && <OllamaModelManager />}
           {activeTab === 'home' && <BackgroundAgentsStatus />}
