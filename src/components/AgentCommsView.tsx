@@ -102,6 +102,8 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   const [time, setTime] = useState('');
   const [selectedMissionAction, setSelectedMissionAction] = useState<AstyriaMissionAction>('deep_scan');
   const [messageText, setMessageText] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const emojiChoices = ['😀','😊','😂','❤️','👍','🎉','🔥','🚀','🤖','✨','💡','✅','⚠️','🛠️','📥','📊','👋','🙏','💬','🌟'];
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [mobileSection, setMobileSection] = useState<'chat' | 'agents'>('chat');
@@ -587,6 +589,12 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             </ul>
           )}
           {attachmentError && <p role="alert" className="mb-2 text-[10px] text-rose-300">{attachmentError}</p>}
+          <div className="mb-2 flex items-center gap-2">
+            <button type="button" disabled={isLoading} aria-expanded={showEmojiPicker} aria-label="Wybierz emotikon" onClick={() => setShowEmojiPicker(v => !v)} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-200 disabled:opacity-50">😊 Emotikony</button>
+          </div>
+          {showEmojiPicker && <div role="group" aria-label="Emotikony" className="mb-2 flex flex-wrap gap-1 rounded-xl border border-slate-700 bg-slate-900 p-2">
+            {emojiChoices.map(emoji => <button key={emoji} type="button" disabled={isLoading} onClick={() => { setMessageText(v => v + emoji); setShowEmojiPicker(false); }} aria-label={`Wstaw emotikon ${emoji}`} className="rounded-lg p-2 text-xl hover:bg-slate-700 focus-visible:outline focus-visible:outline-cyan-400">{emoji}</button>)}
+          </div>}
           <div className="flex items-center gap-1.5 sm:gap-2">
           <div className="relative flex min-w-0 flex-1 items-center">
             <textarea
