@@ -88,6 +88,13 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     if (isLoading || !window.confirm('Ukryć wiadomości tej rozmowy w tym urządzeniu? Historia na serwerze pozostanie bez zmian.')) return;
     startNewConversation();
   };
+  const channels = [
+    { id: 'triad', name: 'Wszyscy · Alex, Astyria, Aria, Aurelius' },
+    { id: 'Alex', name: 'Alex' },
+    { id: 'Astyria', name: 'Astyria' },
+    { id: 'si_1', name: 'Aria' },
+    { id: 'Aurelius', name: 'Aurelius' },
+  ] as const;
   const [selectedTarget, setSelectedTarget] = useState<'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'si_1'>('triad');
   const [selectedCommand, setSelectedCommand] = useState<AgentProtocolCommand>('SYSTEM_STATUS');
   const [signal, setSignal] = useState('');
@@ -251,7 +258,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               disabled={isLoading}
               className="min-w-0 max-w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs font-semibold text-slate-200 outline-none transition focus:border-cyan-500 disabled:opacity-50"
             >
-              <option value="triad">Triada · Alex, Astyria, Aria, Aurelius</option>
+              <option value="triad">Wszyscy · Alex, Astyria, Aria, Aurelius</option>
               <option value="Alex">Alex</option>
               <option value="Astyria">Astyria</option>
               <option value="Aurelius">Aurelius</option>
@@ -419,6 +426,14 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               Nie udało się wysłać żądania: {sendError}
             </div>
           )}
+          <nav aria-label="Kanały agentów AI" className="flex gap-2 overflow-x-auto pb-2">
+            {channels.map(channel => (
+              <button key={channel.id} type="button" disabled={isLoading} onClick={() => { setSelectedTarget(channel.id); setMobileSection('chat'); }} aria-pressed={selectedTarget === channel.id}
+                className={`shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${selectedTarget === channel.id ? 'border-cyan-500 bg-cyan-950 text-cyan-100' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>
+                {channel.name}
+              </button>
+            ))}
+          </nav>
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/80 p-2">
             <button type="button" disabled={isLoading} onClick={startNewConversation} className="rounded-lg bg-cyan-900/50 px-3 py-2 text-xs font-semibold text-cyan-100 disabled:opacity-50">+ Nowy czat</button>
             <label className="text-xs text-slate-400" htmlFor="conversation-history">Historia</label>
