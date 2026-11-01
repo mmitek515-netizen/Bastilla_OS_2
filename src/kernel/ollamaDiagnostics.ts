@@ -19,6 +19,9 @@ export interface OllamaLoadedModel {
 
 export interface OllamaDiagnostics {
   baseUrl: string;
+  configured: boolean;
+  connected: boolean;
+  verified: boolean;
   reachable: boolean;
   version: string | null;
   models: OllamaModelInfo[];
@@ -38,6 +41,7 @@ export interface OllamaHostInfo {
   ramGb: number;
   cpus: number;
   configuredModel: string;
+  providerConfigured?: boolean;
   keepAlive: string;
   numCtx: number;
 }
@@ -49,6 +53,19 @@ export function formatGb(bytes: number): string {
   return `${(bytes / GB).toFixed(1)} GB`;
 }
 
+function displayBaseUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return value.replace(/[?#].*$/, '').replace(/\/+$/, '');
+  }
+}
+
 export async function collectOllamaDiagnostics(
   baseUrl: string,
   host: OllamaHostInfo,
@@ -57,7 +74,10 @@ export async function collectOllamaDiagnostics(
 ): Promise<OllamaDiagnostics> {
   const base = baseUrl.trim().replace(/\/+$/, '');
   const result: OllamaDiagnostics = {
-    baseUrl: base,
+    baseUrl: displayBaseUrl(base),
+    configured: host.providerConfigured ?? true,
+    connected: false,
+    verified: false,
     reachable: false,
     version: null,
     models: [],
@@ -81,10 +101,12 @@ export async function collectOllamaDiagnostics(
 
   try {
     const version = await getJson('/api/version');
+    result.connected = true;
     result.reachable = true;
     result.version = typeof version?.version === 'string' ? version.version : null;
   } catch (error: any) {
-    result.error = `Serwer Ollamy nie odpowiada pod ${base} (${String(error?.message || error)})`;
+    const message = String(error?.message || error).replaceAll(base, result.baseUrl);
+    result.error = `Serwer Ollamy nie odpowiada pod ${result.baseUrl} (${message})`;
     return result;
   }
 
@@ -123,17 +145,22 @@ export async function collectOllamaDiagnostics(
       });
       if (response.ok) {
         const data: any = await response.json();
-        result.firstTokenMs = Date.now() - started;
-        const count = Number(data?.eval_count) || 0;
-        const duration = Number(data?.eval_duration) || 0;
-        if (count > 0 && duration > 0) {
-          result.tokensPerSecond = Math.round((count / (duration / 1e9)) * 10) / 10;
+        if (typeof data?.message?.content === 'string' && data.message.content.trim()) {
+          result.verified = true;
+          result.firstTokenMs = Date.now() - started;
+          const count = Number(data?.eval_count) || 0;
+          const duration = Number(data?.eval_duration) || 0;
+          if (count > 0 && duration > 0) {
+            result.tokensPerSecond = Math.round((count / (duration / 1e9)) * 10) / 10;
+          }
+        } else if (!result.error) {
+          result.error = 'Weryfikacja inferencji nieudana: Ollama nie zwróciła treści odpowiedzi.';
         }
       } else if (!result.error) {
-        result.error = `Pomiar prędkości nieudany: HTTP ${response.status}`;
+        result.error = `Weryfikacja inferencji nieudana: HTTP ${response.status}`;
       }
     } catch (error: any) {
-      if (!result.error) result.error = `Pomiar prędkości nieudany: ${String(error?.message || error)}`;
+      if (!result.error) result.error = `Weryfikacja inferencji nieudana: ${String(error?.message || error)}`;
     }
   }
 
@@ -255,6 +282,7 @@ export function describeOllamaDiagnostics(diag: OllamaDiagnostics): string {
   if (!diag.reachable) return `Ollama: BRAK POŁĄCZENIA (${diag.error ?? 'brak odpowiedzi'})`;
   return [
     `Ollama ${diag.version ?? '?'} @ ${diag.baseUrl}`,
+    `stan: ${diag.configured ? 'skonfigurowana' : 'nieskonfigurowana'}, ${diag.connected ? 'połączona' : 'brak połączenia'}, ${diag.verified ? 'inferencja zweryfikowana' : 'inferencja niezweryfikowana'}`,
     `modele: ${diag.models.length ? diag.models.map((m) => `${m.name} (${formatGb(m.size)})`).join(', ') : 'brak'}`,
     `aktywny model: ${diag.resolvedModel ?? 'brak'}`,
     `w pamięci: ${diag.loaded.length ? diag.loaded.map((m) => `${m.name} (${m.sizeVram > 0 ? 'GPU' : 'CPU'})`).join(', ') : 'nic'}`,

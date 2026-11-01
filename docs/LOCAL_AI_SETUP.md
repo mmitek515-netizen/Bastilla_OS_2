@@ -10,6 +10,10 @@ Usługa nasłuchuje tylko lokalnie na 127.0.0.1:11434. Nie udostępniaj samej Ol
 
 Po instalacji wyślij do każdego z agentów oddzielnie wiadomość zaczynającą się od `@model`. Ten prefiks omija deterministyczne odpowiedzi best-fit. Dopiero faktyczna odpowiedź modelu potwierdza działanie AI. Aria ma wewnętrzny identyfikator `si_1`.
 
+W menedżerze modeli stan „skonfigurowany” oznacza wybór Ollamy w `LLM_PROVIDERS`, „połączony” — odpowiedź lokalnego API, a „zweryfikowany” — niepustą odpowiedź z rzeczywistego wywołania modelu po naciśnięciu „Zweryfikuj inferencję”. Sam wykaz modeli nie potwierdza inferencji. Można sprawdzić wynik przez `GET /api/ollama/diagnostics`.
+
+Wiadomości agent→użytkownik wymagają działającego runtime'u, który sam wyśle zdarzenie przez `POST /api/agents/inbox/send` z `BASTILLA_AGENT_INBOX_TOKEN`. Widok skrzynki odświeża zapisane wiadomości; nie jest to dowód samodzielnej pracy agentów ani push z serwera.
+
 ## Codex CLI
 
 1. `npm run setup:codex` — instaluje oficjalny pakiet @openai/codex w ignorowanym katalogu .bastilla-tools/codex, bez globalnej instalacji npm.

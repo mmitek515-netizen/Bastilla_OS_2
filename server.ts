@@ -41,6 +41,7 @@ import {
   TRIAD_AGENT_NAMES,
   validateAgentProtocolRequest,
 } from './src/kernel/agentProtocol';
+import { isMcpToolAuthorized } from './src/kernel/mcpAuthorization';
 import {
   ChatApprovalAction,
   ChatApprovalCommand,
@@ -278,16 +279,41 @@ app.get('/api/ollama/models', async (_req, res) => {
     const response = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(5000) });
     if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`);
     const data = await response.json() as { models?: unknown[] };
-    return res.json({ models: Array.isArray(data.models) ? data.models : [], configuredModel: LLM_CHAIN_CONFIG.ollamaModel, connected: true });
+    return res.json({
+      models: Array.isArray(data.models) ? data.models : [],
+      configuredModel: LLM_CHAIN_CONFIG.ollamaModel,
+      configured: usesOllama(),
+      connected: true,
+    });
   } catch (err: any) {
     // Return 200 with connected: false so reverse proxies do not intercept 503 with HTML error pages
     return res.status(200).json({
       models: [],
       configuredModel: LLM_CHAIN_CONFIG.ollamaModel,
+      configured: usesOllama(),
       connected: false,
       error: `Ollama niedostępna: ${err?.message || 'Brak odpowiedzi na ' + base}. Kontener dysponuje ~5 GiB RAM (modele >4 GiB nie są wspierane).`
     });
   }
+});
+
+app.get('/api/ollama/diagnostics', async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const cfg = LLM_CHAIN_CONFIG;
+  const diagnostics = await collectOllamaDiagnostics(
+    cfg.ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL,
+    {
+      ramGb: Math.round(os.totalmem() / 1024 ** 3),
+      cpus: os.cpus().length,
+      configuredModel: cfg.ollamaModel || 'auto',
+      providerConfigured: usesOllama(),
+      keepAlive: cfg.ollamaKeepAlive || '24h',
+      numCtx: cfg.ollamaNumCtx || 4096,
+    },
+    fetch,
+    AbortSignal.timeout(90000),
+  );
+  return res.json(diagnostics);
 });
 
 // Background supervisor: read-only Ollama health and model inventory checks.
@@ -3702,6 +3728,7 @@ async function runOllamaOptimizeMission(): Promise<{
       ramGb: Math.round(os.totalmem() / 1024 ** 3),
       cpus: os.cpus().length,
       configuredModel: cfg.ollamaModel || 'auto',
+      providerConfigured: usesOllama(),
       keepAlive: cfg.ollamaKeepAlive || '24h',
       numCtx: cfg.ollamaNumCtx || 4096,
     },
@@ -5987,7 +6014,7 @@ interface McpToolDefinition {
 const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: 'astyria_command',
-    description: 'Wykonaj polecenie lub zapytanie przez agenta Astyria (hipernadzorca BastillaOS / SVL Kernel).',
+    description: 'Jawnie wywołaj polecenie Astyrii. Nie oznacza samodzielnej pracy agenta; wymaga autoryzacji MCP.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -6001,7 +6028,7 @@ const MCP_TOOLS: McpToolDefinition[] = [
   },
   {
     name: 'astyria_mission',
-    description: 'Uruchom autonomiczną misję naprawczą lub diagnostyczną Astyrii (np. repair_all, repair_ollama_and_llm, deep_scan).',
+    description: 'Jawnie uruchom akcję misji Astyrii. Zmiany wymagają skonfigurowanej autoryzacji MCP i działającego wykonawcy.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -6028,7 +6055,7 @@ const MCP_TOOLS: McpToolDefinition[] = [
   },
   {
     name: 'chat_triad',
-    description: 'Wyślij wiadomość do agentów Triady (Alex, Astyria, Aurelius, Aria).',
+    description: 'Wyślij wiadomość do skonfigurowanego łańcucha modeli agentów; nie uruchamia niezależnych pracowników.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -6298,6 +6325,16 @@ app.all(['/api/mcp', '/mcp'], async (req, res) => {
       case 'tools/call': {
         const toolName = params?.name;
         const toolArguments = params?.arguments || {};
+        if (!isMcpToolAuthorized(toolName, req.get('Authorization'), process.env.BASTILLA_MCP_TOKEN)) {
+          return res.json({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: 'To narzędzie MCP wymaga poprawnego BASTILLA_MCP_TOKEN (co najmniej 32 znaki).' }],
+              isError: true,
+            },
+          });
+        }
         const callResult = await handleMcpToolCall(toolName, toolArguments);
         return res.json({
           jsonrpc: '2.0',
@@ -6629,5 +6666,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
 

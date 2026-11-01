@@ -33,6 +33,9 @@ const healthyRoutes = (tokens = 40, nanos = 8_000_000_000) => [
 test('diagnostyka zbiera wersję, modele, prędkość i stan pamięci', async () => {
   const { impl, calls } = router(healthyRoutes());
   const diag = await collectOllamaDiagnostics('http://127.0.0.1:11434/', host, impl);
+  assert.equal(diag.configured, true);
+  assert.equal(diag.connected, true);
+  assert.equal(diag.verified, true);
   assert.equal(diag.reachable, true);
   assert.equal(diag.version, '0.9.0');
   assert.equal(diag.resolvedModel, 'qwen3.5:4b');
@@ -46,11 +49,35 @@ test('diagnostyka zbiera wersję, modele, prędkość i stan pamięci', async ()
 test('brak serwera Ollamy → jedna rekomendacja z poleceniem instalacji', async () => {
   const { impl } = router([[/./, () => { throw new TypeError('fetch failed'); }]]);
   const diag = await collectOllamaDiagnostics('http://127.0.0.1:11434', host, impl);
+  assert.equal(diag.configured, true);
+  assert.equal(diag.connected, false);
+  assert.equal(diag.verified, false);
   assert.equal(diag.reachable, false);
   const recs = buildOllamaRecommendations(diag);
   assert.equal(recs.length, 1);
   assert.equal(recs[0].command, 'npm run setup:ollama');
   assert.match(describeOllamaDiagnostics(diag), /BRAK POŁĄCZENIA/);
+});
+
+test('configured, connected, and verified are separate states', async () => {
+  const connected = await collectOllamaDiagnostics(
+    'http://127.0.0.1:11434',
+    { ...host, providerConfigured: false },
+    router(healthyRoutes()).impl,
+  );
+  assert.equal(connected.configured, false);
+  assert.equal(connected.connected, true);
+  assert.equal(connected.verified, true);
+
+  const noInference = await collectOllamaDiagnostics('http://127.0.0.1:11434', host, router([
+    [/api\/version/, () => json(200, { version: '1' })],
+    [/api\/tags/, () => json(200, { models: [{ name: 'qwen3:4b', size: GB }] })],
+    [/api\/chat/, () => json(200, { message: { content: '' } })],
+    [/api\/ps/, () => json(200, { models: [] })],
+  ]).impl);
+  assert.equal(noInference.connected, true);
+  assert.equal(noInference.verified, false);
+  assert.match(noInference.error, /nie zwróciła treści/);
 });
 
 test('wolny model na CPU → mniejszy model; szybki z dużym RAM → większy', async () => {

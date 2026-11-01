@@ -26,6 +26,8 @@ By default the MCP endpoint is `http://127.0.0.1:8000/mcp` and the BastillaOS AP
 
 No shell access, arbitrary commands, file writes, or model cloud API keys are required.
 
+The legacy Express MCP endpoints `/api/mcp` and `/mcp` keep protocol discovery available, but require `BASTILLA_MCP_TOKEN` (at least 32 random characters) for mission, command, and chat tool calls. Only the read-only `kernel_status` tool is callable without it. This token does not replace authenticated HTTPS ingress.
+
 ## Remote access
 
 **Never publish port 8000 directly.** The underlying development API does not authenticate accounts. Use an HTTPS reverse proxy with proper authentication (ideally OAuth supported by your MCP client), access controls, and rate limits before registering a remote MCP URL. A tunnel alone does not provide authentication. Do not publish the BastillaOS development server itself.

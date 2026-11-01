@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
 
 type OllamaModel = { name?: string; model?: string; size?: number; modified_at?: string; details?: { parameter_size?: string; quantization_level?: string } };
-type Inventory = { models: OllamaModel[]; configuredModel: string; connected: boolean; error?: string };
+type Inventory = { models: OllamaModel[]; configuredModel: string; configured?: boolean; connected: boolean; error?: string };
+type Verification = { configured: boolean; connected: boolean; verified: boolean; error: string | null };
 const formatSize = (bytes?: number) => typeof bytes === 'number' ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : '—';
 
 export function OllamaModelManager() {
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [verification, setVerification] = useState<Verification | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const refresh = async (signal?: AbortSignal) => {
     try {
       const response = await fetch('/api/ollama/models', { cache: 'no-store', signal });
@@ -34,13 +37,43 @@ export function OllamaModelManager() {
     void refresh(controller.signal);
     return () => controller.abort();
   }, []);
+  const verifyInference = async () => {
+    setVerifying(true);
+    try {
+      const response = await fetch('/api/ollama/diagnostics', { cache: 'no-store' });
+      if (!response.headers.get('content-type')?.includes('application/json')) {
+        throw new Error('Diagnostyka zwróciła odpowiedź niebędącą formatem JSON.');
+      }
+      if (!response.ok) throw new Error(`Diagnostyka zwróciła HTTP ${response.status}.`);
+      const result = await response.json() as Verification;
+      setVerification(result);
+    } catch (cause) {
+      setVerification({
+        configured: inventory?.configured ?? false,
+        connected: false,
+        verified: false,
+        error: cause instanceof Error ? cause.message : 'Nie udało się zweryfikować inferencji.',
+      });
+    } finally {
+      setVerifying(false);
+    }
+  };
   return (
     <section aria-label="Menedżer modeli Ollama" className="space-y-3 rounded-xl border border-cyan-800/40 bg-slate-950/80 p-4 text-slate-100">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold text-cyan-100">Menedżer modeli Ollama</h2>
         <button type="button" onClick={() => { setLoading(true); void refresh(); }} className="rounded-md border border-cyan-700 px-3 py-1.5 text-xs hover:bg-cyan-900/30">Odśwież listę</button>
+        <button type="button" onClick={() => { void verifyInference(); }} disabled={verifying} className="rounded-md border border-cyan-700 px-3 py-1.5 text-xs hover:bg-cyan-900/30 disabled:opacity-50">
+          {verifying ? 'Testowanie modelu…' : 'Zweryfikuj inferencję'}
+        </button>
       </div>
       <p className="text-xs text-slate-400">Model skonfigurowany: <strong className="text-cyan-200">{inventory?.configuredModel ?? 'Sprawdzanie…'}</strong></p>
+      <p className="text-xs text-slate-400">
+        Provider: {inventory ? (inventory.configured ? 'skonfigurowany' : 'nieskonfigurowany') : 'sprawdzanie…'} ·
+        Ollama: {inventory?.connected ? 'połączona' : inventory ? 'offline' : 'sprawdzanie…'} ·
+        Inferencja: {verification?.verified ? 'zweryfikowana' : verification ? 'niezweryfikowana' : 'nie sprawdzono'}
+      </p>
+      {verification?.error && <p role="status" className="text-xs text-amber-300">{verification.error}</p>}
       {loading && <p role="status" className="text-sm text-slate-400">Łączenie z Ollama…</p>}
       {error && (
         <div role="alert" className="rounded-lg border border-amber-800/40 bg-amber-950/20 p-3 text-xs text-amber-300">
