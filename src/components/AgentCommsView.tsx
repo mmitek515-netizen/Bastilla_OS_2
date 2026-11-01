@@ -150,7 +150,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   };
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-slate-950 font-mono text-xs cyber-grid lg:flex-row">
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-slate-950 text-sm lg:flex-row">
       <div className="grid grid-cols-2 gap-1 border-b border-slate-800 bg-slate-900/90 p-1.5 lg:hidden">
         <button
           type="button"
@@ -174,9 +174,9 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
       {/* Left/Main Column: Chat Stream */}
       <div className={`${mobileSection === 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-r border-slate-800/80 bg-slate-950/70 backdrop-blur-md lg:flex`}>
         {/* Futuristic Channel Bar */}
-        <div className="bg-slate-900/80 backdrop-blur-md border-b border-cyan-500/20 px-2 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-sm shrink-0">
+        <div className="bg-slate-900/90 backdrop-blur-md border-b border-slate-700/50 px-2 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-sm shrink-0">
           <div className="flex min-w-0 max-w-full items-center gap-1.5 sm:gap-2.5 flex-wrap">
-            <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px] shrink-0">WĘZEŁ:</span>
+            <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px] shrink-0">Rozmowa z</span>
             <select
               aria-label="Cel transmisji"
               value={selectedTarget}
@@ -198,7 +198,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               WITHOUT_NLP: OK
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
-              PAKIETY: <strong className="text-slate-300">{dataStore.chat_history.length}</strong>
+              Wiadomości: <strong className="text-slate-300">{dataStore.chat_history.length}</strong>
             </span>
             {onTriggerInitiative && (
               <button
@@ -240,8 +240,8 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
           </div>
         </div>
 
-        <button type="button" aria-expanded={showProtocolTools} onClick={() => setShowProtocolTools(!showProtocolTools)} className="shrink-0 border-b border-slate-800 px-3 py-2 text-left text-cyan-200 lg:hidden">{showProtocolTools ? 'Ukryj narzędzia protokołu i misji' : 'Narzędzia protokołu i misji'}</button>
-        <div className={`${showProtocolTools ? 'block' : 'hidden'} shrink-0 max-h-[45dvh] overflow-y-auto lg:block lg:max-h-none`}>
+        <button type="button" aria-expanded={showProtocolTools} onClick={() => setShowProtocolTools(!showProtocolTools)} className="shrink-0 border-b border-slate-800 px-3 py-2 text-left text-slate-300 hover:text-white">{showProtocolTools ? 'Ukryj narzędzia zaawansowane' : 'Pokaż narzędzia zaawansowane'}</button>
+        <div className={`${showProtocolTools ? 'block' : 'hidden'} shrink-0 max-h-[45dvh] overflow-y-auto`}>
         <div className="flex flex-wrap items-end gap-2 border-b border-slate-800 bg-slate-900/60 px-3 py-2">
           <label className="flex min-w-48 flex-1 flex-col gap-1 text-[10px] text-slate-400">
             Polecenie strukturalne
@@ -345,7 +345,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
             followLatestMessagesRef.current = scrollHeight - scrollTop - clientHeight < 120;
           }}
-          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 space-y-3.5 scrollbar-thin"
+          className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 space-y-5 scrollbar-thin"
         >
           {sendError && (
             <div role="alert" aria-live="assertive" className="rounded-lg border border-rose-500/40 bg-rose-950/40 p-3 text-xs text-rose-200">
@@ -360,7 +360,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             return (
               <div
                 key={idx}
-                className={`flex flex-col p-4 rounded-xl border transition-all duration-200 backdrop-blur-md ${
+                className={`flex flex-col p-4 rounded-2xl border transition-all duration-200 ${
                   isOperator
                     ? 'bg-purple-950/25 border-purple-500/40 ml-4 md:ml-12 shadow-[0_2px_15px_rgba(168,85,247,0.1)]'
                     : profile
@@ -390,7 +390,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
                 </div>
 
                 {/* Message Body with KaTeX LaTeX formulas and Markdown */}
-                <FormattedMessage content={msg.tekst} className="text-xs leading-relaxed text-slate-200" />
+                <FormattedMessage content={msg.tekst} className="text-sm leading-7 text-slate-200" />
 
                 {/* Attached Image/File preview in chat history */}
                 {msg.file && (
@@ -428,7 +428,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 text-slate-300 p-3 bg-slate-900/70 rounded-lg border border-slate-800">
               <div className="flex items-center gap-2">
                 <RefreshCw className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                <span className="text-xs">Przetwarzanie transmisji przez węzły (Alex, Astyria, Aurelius, Aria)...</span>
+                <span className="text-xs">Asystent przygotowuje odpowiedź…</span>
               </div>
               {onForceSync && (
                 <button
@@ -473,7 +473,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               rows={2}
               disabled={isLoading}
               placeholder="Wiadomość do agentów…"
-              className="w-full resize-y rounded-lg border border-slate-700/70 bg-slate-900/90 px-3 py-2.5 pr-8 font-mono text-xs text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 disabled:opacity-50 sm:rounded-xl sm:px-4"
+              className="w-full resize-y rounded-lg border border-slate-700/70 bg-slate-900/90 px-3 py-2.5 pr-8 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 disabled:opacity-50 sm:rounded-xl sm:px-4"
             />
             {messageText && !isLoading && (
               <button
@@ -506,7 +506,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-2.5 py-2.5 font-mono text-xs font-bold text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.3)] transition hover:from-emerald-400 hover:to-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 sm:rounded-xl sm:px-3"
           >
             <Send className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden text-[11px] sm:inline">TRANSMISJA</span>
+            <span className="hidden text-[11px] sm:inline">Wyślij</span>
           </button>
           </div>
           <p className="mt-1 px-1 text-[9px] text-slate-500">
@@ -520,7 +520,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
       <div className={`${mobileSection === 'agents' ? 'flex' : 'hidden'} min-h-0 w-full flex-col overflow-y-auto border-t border-slate-800/80 bg-slate-950/80 p-3 backdrop-blur-xl space-y-4 scrollbar-thin sm:p-4 lg:flex lg:w-84 lg:border-t-0`}>
         <div className="flex items-center justify-between gap-2 pb-3 border-b border-cyan-500/20">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-100 uppercase tracking-wider text-xs">TRIADA KWANTOWA</span>
+            <span className="font-bold text-slate-100 uppercase tracking-wider text-xs">ASYSTENCI AI</span>
           </div>
           <span
             role="status"
