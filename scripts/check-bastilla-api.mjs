@@ -25,10 +25,16 @@ const checks = [
   ['/api/ollama/models', d => typeof d.connected === 'boolean'],
   ['/api/vm-gemini-4/status', d => !!d && typeof d === 'object'],
 ];
+const statusToken = (process.env.BASTILLA_AGENT_STATUS_TOKEN || '').trim();
+if (statusToken.length >= 32) {
+  checks.push(['/api/agents/status', d => d.success === true && !!d.agents, { Authorization: 'Bearer ' + statusToken }]);
+} else {
+  console.log('SKIP /api/agents/status set BASTILLA_AGENT_STATUS_TOKEN (32+ characters) to verify authenticated status.');
+}
 let failures = 0;
-for (const [path, valid] of checks) {
+for (const [path, valid, headers = {}] of checks) {
   try {
-    const response = await fetch(origin + path, { signal: AbortSignal.timeout(10000), headers: { Accept: 'application/json' }, redirect: 'error' });
+    const response = await fetch(origin + path, { signal: AbortSignal.timeout(10000), headers: { Accept: 'application/json', ...headers }, redirect: 'error' });
     const type = response.headers.get('content-type') || '';
     if (!type.includes('application/json')) throw Error('not JSON (possibly login or preview page)');
     const data = await response.json();

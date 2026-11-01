@@ -34,3 +34,11 @@ Backend odziedziczył rozbudowane endpointy zapisu i wymaga audytu przed
 publicznym udostępnieniem. Build zgłasza duży pakiet JS (~1.85 MB przed gzip);
 podział ładowania UI jest kolejnym zadaniem optymalizacyjnym.
 Raport nie określa procentu ukończenia całego systemu.
+
+## Status agentów — 2026-11-01
+
+- `GET /api/agents/status` wymaga `BASTILLA_AGENT_STATUS_TOKEN` (co najmniej 32 znaki) i Bearer; odpowiedzi nie są buforowane. Token nie znajduje się w kodzie UI ani `localStorage`; operator wprowadza go w panelu, a UI trzyma go tylko w pamięci komponentu.
+- Źródłem dowodu aktywności jest bieżący executor `AgentTaskRegistry` w procesie serwera oraz czas ostatniego zdarzenia rejestru. Sam zapis `running` na dysku, ukończone zadanie, profil agenta, dostępność Ollama ani przypisany Issue nie potwierdzają procesu aktywnego.
+- Dane API wygasają po 45 sekundach. Ostatnie błędy zadań są widoczne jako błąd maksymalnie przez 24 godziny; starsze lub brakujące dane są niezweryfikowane.
+- Obecny rejestr nie dostarcza wiarygodnego stanu oczekiwania ani zablokowania i nie raportuje osobno GitHub Issues/PR/Actions, heartbeatów zewnętrznych wykonawców ani inferencji modelu. Te stany nie są zgadywane; pozostają niezweryfikowane, dopóki nie pojawi się jawna telemetria.
+- Lokalny serwer/testy potwierdzają wyłącznie funkcję tego endpointu i rejestru. Nie stanowią dowodu uruchomienia zewnętrznych agentów ani połączenia z ChatGPT.

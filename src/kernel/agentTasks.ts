@@ -232,6 +232,10 @@ class AgentTaskRegistry {
     return task ? verifyTaskArtifact(task) : undefined;
   }
 
+  public isExecutorRunning(id: string): boolean {
+    return this.runningExecutors.has(id);
+  }
+
   public cancel(id: string): boolean {
     const task = this.tasks.get(id);
     if (!task) return false;

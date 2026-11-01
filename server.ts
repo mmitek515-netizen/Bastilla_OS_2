@@ -55,6 +55,7 @@ import {
 } from './src/kernel/chatAttachments';
 import { cleanAgentReplyText, extractAgentCommands } from './src/kernel/agentCommands';
 import { agentTaskRegistry } from './src/kernel/agentTasks';
+import { registerAgentStatus } from './src/lib/agentStatus.mjs';
 import {
   formatBestFitReport,
   selectBestFit,
@@ -6338,6 +6339,8 @@ app.post('/api/kernel/agent', (_req, res) => {
 // ============================================================================
 
 const agentTasksToken = (process.env.BASTILLA_AGENT_TASKS_TOKEN || '').trim();
+registerAgentStatus(app, { registry: agentTaskRegistry });
+
 function authorizeAgentTasks(req: express.Request, res: express.Response): boolean {
   if (!agentTasksToken) {
     res.status(503).json({ success: false, error: 'Ustaw BASTILLA_AGENT_TASKS_TOKEN, aby włączyć operacje na zadaniach agentów.' });
@@ -6629,5 +6632,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
 
