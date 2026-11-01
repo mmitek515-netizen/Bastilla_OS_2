@@ -519,6 +519,30 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             );
           })}
 
+          <details open={isLoading} className="rounded-xl border border-cyan-900/60 bg-slate-900/70 text-xs text-slate-200">
+            <summary className="cursor-pointer px-3 py-3 font-semibold text-cyan-100">⚙️ Operacje w tle · {isLoading ? 'trwa przetwarzanie' : 'panel zdarzeń'}</summary>
+            <div className="space-y-3 border-t border-slate-700 px-3 py-3">
+              {isLoading ? (
+                <div role="status" className="flex items-center gap-2"><RefreshCw className="h-4 w-4 animate-spin" /> Żądanie czatu jest przetwarzane · {activityElapsed} s</div>
+              ) : <p className="text-slate-400">Brak aktualnie wykonywanego żądania czatu.</p>}
+              {streamProgress && streamProgress.total > 0 && (
+                <div>
+                  <div className="mb-1 flex justify-between gap-2"><span>{streamProgress.label}</span><span>{Math.round(100 * streamProgress.completed / streamProgress.total)}%</span></div>
+                  <progress value={streamProgress.completed} max={streamProgress.total} className="h-2 w-full accent-cyan-400" />
+                  <p className="mt-1 text-slate-400">Zakończone obliczenia agentów: {streamProgress.completed}/{streamProgress.total}</p>
+                </div>
+              )}
+              <details className="rounded-lg border border-slate-700 p-2">
+                <summary className="cursor-pointer">📋 Potwierdzone zdarzenia backendu ({activityEvents.length})</summary>
+                {activityFeedError ? <p className="mt-2 text-amber-300">Nie udało się pobrać logów.</p> : activityEvents.length === 0 ? <p className="mt-2 text-slate-400">Brak zarejestrowanych zdarzeń.</p> : (
+                  <ol className="mt-2 max-h-44 space-y-1 overflow-y-auto font-mono text-[11px]">
+                    {activityEvents.slice(-12).reverse().map(event => <li key={event.id} className="rounded bg-slate-950 p-2">{event.timestamp} · {event.category} · {event.status}{event.commit ? ` · commit ${event.commit.slice(0,10)}` : ''}</li>)}
+                  </ol>
+                )}
+              </details>
+              <p className="text-slate-500">Nie pokazujemy niepotwierdzonych poleceń powłoki ani fikcyjnych etapów pobierania.</p>
+            </div>
+          </details>
           <details className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
             <summary className="cursor-pointer font-semibold text-slate-100">Rzeczywiste zdarzenia narzędzi i GitHub ({activityEvents.length})</summary>
             <p className="my-2 text-slate-400">Odczyt logów serwera co 5 sekund. Zdarzenia nie są przypisywane agentom bez potwierdzenia tożsamości.</p>
