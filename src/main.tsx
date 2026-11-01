@@ -1,5 +1,5 @@
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import { BastillaOS2View } from './components/BastillaOS2View';
 import './index.css';
 
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(<BastillaOS2View />);
