@@ -64,7 +64,7 @@ for required in \
   usr/share/bastillaos/system-defaults/package-lock.json \
   usr/share/bastillaos/system-defaults/index.html \
   usr/share/bastillaos/system-defaults/README.md \
-  usr/share/bastillaos/system-defaults/.github/workflows/build-bastillaos.yml \
+  usr/share/bastillaos/system-defaults/.github/workflows/ci.yml \
   usr/share/bastillaos/system-defaults/.gitignore; do
   [ -f "$ROOT/$required" ] || { echo "test-package: missing $required" >&2; exit 1; }
 done
@@ -171,15 +171,14 @@ node -e "
   const status = await statusResponse.json();
   if (
     !statusResponse.ok ||
-    typeof status.enabled !== 'boolean' ||
-    status.provider !== (status.enabled ? 'Google Gemini API' : 'disabled') ||
-    status.connection !== (status.enabled ? 'configured' : 'disabled') ||
+    status.enabled !== true ||
+    status.provider !== 'Ollama (lokalnie)' ||
+    status.connection !== 'local-ollama' ||
     status.protocol !== '/api/triad/command' ||
     status.chatProtocol !== '/api/triad/message' ||
-    'apiKey' in status ||
-    'model' in status
+    'apiKey' in status
   ) {
-    throw new Error('text model status does not accurately report Gemini chat configuration');
+    throw new Error('text model status does not accurately report the local-only chat configuration');
   }
 
   for (const route of ['/api/kernel/agent', '/api/terminal/generate-script']) {
