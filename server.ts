@@ -6338,6 +6338,7 @@ app.post('/api/kernel/agent', (_req, res) => {
 // ============================================================================
 
 const agentTasksToken = (process.env.BASTILLA_AGENT_TASKS_TOKEN || '').trim();
+const agentTaskRequestTimes = new Map<string, number[]>();
 function authorizeAgentTasks(req: express.Request, res: express.Response): boolean {
   if (!agentTasksToken) {
     res.status(503).json({ success: false, error: 'Ustaw BASTILLA_AGENT_TASKS_TOKEN, aby włączyć operacje na zadaniach agentów.' });
@@ -6350,8 +6351,27 @@ function authorizeAgentTasks(req: express.Request, res: express.Response): boole
   return true;
 }
 
+function allowAgentTaskRequest(
+  res: express.Response,
+  operation: string,
+  limit: number,
+  windowMs = 60_000,
+): boolean {
+  const now = Date.now();
+  const recent = (agentTaskRequestTimes.get(operation) || []).filter((timestamp) => timestamp > now - windowMs);
+  if (recent.length >= limit) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((recent[0] + windowMs - now) / 1000))));
+    res.status(429).json({ success: false, error: 'Zbyt wiele żądań. Spróbuj ponownie później.' });
+    return false;
+  }
+  recent.push(now);
+  agentTaskRequestTimes.set(operation, recent);
+  return true;
+}
+
 app.get('/api/agent-tasks', (req, res) => {
   if (!authorizeAgentTasks(req, res)) return;
+  if (!allowAgentTaskRequest(res, 'list', 120)) return;
   res.setHeader('Cache-Control', 'no-store');
   return res.json({
     success: true,
@@ -6362,6 +6382,7 @@ app.get('/api/agent-tasks', (req, res) => {
 
 app.post('/api/agent-tasks/run', async (req, res) => {
   if (!authorizeAgentTasks(req, res)) return;
+  if (!allowAgentTaskRequest(res, 'run', 10)) return;
   try {
     const { agent, title, description, executionType, actionType, targetAppId } = req.body;
     if (!agent || !title || !description) {
@@ -6411,6 +6432,7 @@ app.post('/api/agent-tasks/run', async (req, res) => {
 
 app.post('/api/agent-tasks/cancel', (req, res) => {
   if (!authorizeAgentTasks(req, res)) return;
+  if (!allowAgentTaskRequest(res, 'cancel', 30)) return;
   const { id } = req.body;
   if (!id) {
     return res.status(400).json({ success: false, error: 'Brak identyfikatora zadania.' });
@@ -6421,6 +6443,7 @@ app.post('/api/agent-tasks/cancel', (req, res) => {
 
 app.post('/api/agent-tasks/retry', (req, res) => {
   if (!authorizeAgentTasks(req, res)) return;
+  if (!allowAgentTaskRequest(res, 'retry', 5)) return;
   const { id } = req.body;
   if (typeof id !== 'string' || !id) {
     return res.status(400).json({ success: false, error: 'Brak identyfikatora zadania.' });
