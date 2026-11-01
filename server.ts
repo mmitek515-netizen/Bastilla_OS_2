@@ -1,4 +1,5 @@
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { registerGptActions } from './src/lib/gptActions.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
@@ -476,7 +477,13 @@ app.get('/api/github/status', (_req, res) => {
   });
 });
 
-app.get('/api/github/agents/evidence', async (req, res) => {
+app.get('/api/github/agents/evidence', rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many GitHub evidence requests. Try again shortly.' },
+}), async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Vary', 'Authorization');
   if (githubDashboardToken.length < 32) {
