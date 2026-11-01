@@ -72,6 +72,25 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     const interval = window.setInterval(() => setActivityElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => window.clearInterval(interval);
   }, [isLoading]);
+  const [activityEvents, setActivityEvents] = useState<Array<{id: string; timestamp: string; category: string; status: string; commit?: string}>>([]);
+  const [activityFeedError, setActivityFeedError] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    const refresh = async () => {
+      if (document.hidden) return;
+      try {
+        const response = await fetch('/api/agents/activity', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Activity endpoint unavailable');
+        const result = await response.json() as { events?: typeof activityEvents };
+        if (!disposed) { setActivityEvents(Array.isArray(result.events) ? result.events : []); setActivityFeedError(false); }
+      } catch { if (!disposed) setActivityFeedError(true); }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 5000);
+    const onVisible = () => { if (!document.hidden) void refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { disposed = true; window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
   const followLatestMessagesRef = useRef(true);
   const transmissionStatus = sendError
     ? { label: 'BŁĄD TRANSMISJI', color: 'rose' }
@@ -431,6 +450,23 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               </div>
             );
           })}
+
+          <details className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
+            <summary className="cursor-pointer font-semibold text-slate-100">Rzeczywiste zdarzenia narzędzi i GitHub ({activityEvents.length})</summary>
+            <p className="my-2 text-slate-400">Odczyt logów serwera co 5 sekund. Zdarzenia nie są przypisywane agentom bez potwierdzenia tożsamości.</p>
+            {activityFeedError ? <p role="status" className="text-amber-300">Nie można pobrać zdarzeń z serwera.</p> : activityEvents.length === 0 ? <p>Brak potwierdzonych zdarzeń.</p> : (
+              <ol className="max-h-56 space-y-2 overflow-y-auto">
+                {activityEvents.slice(-15).reverse().map(event => (
+                  <li key={event.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-800/70 px-3 py-2">
+                    <span className="text-slate-400">{event.timestamp}</span>
+                    <span className="font-medium">{event.category}</span>
+                    <span className={event.status === 'warning' || event.status === 'error' ? 'text-amber-300' : 'text-emerald-300'}>{event.status === 'reported' ? 'Zarejestrowano' : event.status === 'warning' ? 'Ostrzeżenie' : 'Błąd'}</span>
+                    {event.commit && <code className="text-cyan-300">commit {event.commit.slice(0, 10)}</code>}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </details>
 
           {isLoading && (
             <section aria-label="Aktywność asystenta" aria-live="polite" className="rounded-2xl border border-slate-700 bg-slate-900/80 p-3 sm:p-4 text-slate-200">
