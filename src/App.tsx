@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { buildSyncReport, formatSyncReport } from './lib/syncReport';
+import { isSyncCommand } from './lib/syncCommand';
 import {
   DataStore,
   INITIAL_DATA_STORE,
@@ -402,7 +404,7 @@ export default function App() {
   ) => {
     // /sync refreshes the authoritative kernel state and reports the actual scope.
     // It does NOT silently commit, push or deploy uncommitted project changes.
-    if (attachments.length === 0 && /^(?:\/sync|sync|synchronizuj(?:\s+całą\s+aplikację|\s+cala\s+aplikacje)?)\s*[.!]?$/iu.test(message.trim())) {
+    if (attachments.length === 0 && isSyncCommand(message)) {
       setIsAgentLoading(true);
       setAgentError(null);
       try {
@@ -412,11 +414,11 @@ export default function App() {
         if (!payload?.store || typeof payload.store !== 'object') throw new Error('Serwer nie zwrócił poprawnego stanu systemu');
         const normalized = normalizeDataStore(payload.store);
         setDataStore(normalized);
-        setStreamedReply('SYNC: odświeżono stan jądra i czatu z serwera. Synchronizacja plików projektów, baz danych, GitHub, AI Studio i wdrożeń nie została potwierdzona — te integracje wymagają osobnych mechanizmów.');
+        setStreamedReply('Odczyt jądra: OK.\n' + formatSyncReport(buildSyncReport(true)));
       } catch (error) {
         const details = error instanceof Error ? error.message : String(error);
         setAgentError(`SYNC nie powiódł się: ${details}`);
-        setStreamedReply('SYNC: nie udało się odświeżyć danych. Nie potwierdzono synchronizacji.');
+        setStreamedReply(formatSyncReport(buildSyncReport(false)));
       } finally {
         setIsAgentLoading(false);
       }
