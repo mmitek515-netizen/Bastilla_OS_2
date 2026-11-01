@@ -9,7 +9,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
-import { randomUUID, createHash } from 'crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import { INITIAL_DATA_STORE } from './src/kernel/svlKernel';
 import type { ChatSystemChange } from './src/kernel/chatChanges';
 import { withoutNlpEngine } from './src/lib/withoutNlpEngine';
@@ -6175,8 +6175,28 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
   }
 }
 
+// MCP is disabled by default. A dedicated token is required before any tool can be exposed.
+const mcpAccessToken = (process.env.BASTILLA_MCP_TOKEN || '').trim();
+function authorizeMcp(req: express.Request, res: express.Response): boolean {
+  res.setHeader('Cache-Control', 'no-store');
+  if (mcpAccessToken.length < 32) {
+    res.status(503).json({ error: 'MCP disabled: configure BASTILLA_MCP_TOKEN (32+ characters).' });
+    return false;
+  }
+  const provided = req.get('Authorization') || '';
+  const expectedDigest = createHash('sha256').update(`Bearer ${mcpAccessToken}`).digest();
+  const providedDigest = createHash('sha256').update(provided).digest();
+  if (!timingSafeEqual(expectedDigest, providedDigest)) {
+    res.setHeader('WWW-Authenticate', 'Bearer');
+    res.status(401).json({ error: 'Unauthorized MCP request.' });
+    return false;
+  }
+  return true;
+}
+
 // MCP SSE endpoint
 app.get('/api/mcp/sse', (req, res) => {
+  if (!authorizeMcp(req, res)) return;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -6291,7 +6311,7 @@ app.get('/api/mcp/openapi.json', (req, res) => {
 
 // MCP JSON-RPC 2.0 endpoint (ChatGPT / Claude / Cursor MCP)
 app.all(['/api/mcp', '/mcp'], async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (!authorizeMcp(req, res)) return;
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Protocol-Version, Mcp-Session-Id');
 
