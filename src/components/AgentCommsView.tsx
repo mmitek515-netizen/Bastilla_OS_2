@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { DataStore, OPERATOR_NAME } from '../kernel/svlKernel';
 import { SYSTEM_AGENTS, AgentProfile } from '../kernel/agents';
-import { Sparkles, Layers, ShieldCheck, RefreshCw, Image as ImageIcon, FileText, Sigma, MessagesSquare, Paperclip, Send, X } from 'lucide-react';
+import { Sparkles, Layers, ShieldCheck, RefreshCw, Image as ImageIcon, FileText, Sigma, MessagesSquare, Paperclip, Send, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { FormattedMessage } from './FormattedMessage';
 import {
   ASTYRIA_MISSION_ACTIONS,
@@ -104,6 +104,24 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   const [time, setTime] = useState('');
   const [selectedMissionAction, setSelectedMissionAction] = useState<AstyriaMissionAction>('deep_scan');
   const [messageText, setMessageText] = useState('');
+  // Local reactions: only the operator can cast a vote here.
+  // Agent votes require authenticated agent actions on the backend.
+  type Reaction = { messageKey: string; voter: string; vote: 'up' | 'down' };
+  const reactionStorageKey = 'bastilla_chat_reactions_v1';
+  const [reactions, setReactions] = useState<Reaction[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(reactionStorageKey) || '[]');
+      return Array.isArray(saved) ? saved.filter((v: any) => typeof v.messageKey === 'string' && v.voter === 'Operator' && (v.vote === 'up' || v.vote === 'down')) : [];
+    } catch { return []; }
+  });
+  useEffect(() => { try { localStorage.setItem(reactionStorageKey, JSON.stringify(reactions)); } catch { /* storage unavailable */ } }, [reactions]);
+  const toggleReaction = (messageKey: string, vote: 'up' | 'down') => {
+    setReactions(prev => {
+      const existing = prev.find(v => v.messageKey === messageKey && v.voter === 'Operator');
+      const without = prev.filter(v => !(v.messageKey === messageKey && v.voter === 'Operator'));
+      return existing?.vote === vote ? without : [...without, { messageKey, voter: 'Operator', vote }];
+    });
+  };
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const emojiChoices = ['😀','😊','😂','❤️','👍','🎉','🔥','🚀','🤖','✨','💡','✅','⚠️','🛠️','📥','📊','👋','🙏','💬','🌟'];
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
@@ -451,6 +469,8 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             const agentKey = msg.agent === OPERATOR_NAME ? 'Operator' : msg.agent;
             const profile: AgentProfile | undefined = SYSTEM_AGENTS[agentKey] || SYSTEM_AGENTS[msg.agent];
             const isOperator = msg.agent === OPERATOR_NAME || msg.agent === 'Operator';
+            const messageKey = String((activeConversation?.start ?? 0) + idx) + ':' + msg.agent + ':' + msg.tekst;
+            const myReaction = reactions.find(v => v.messageKey === messageKey && v.voter === 'Operator')?.vote;
 
             return (
               <div
@@ -487,6 +507,11 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
                 {/* Message Body with KaTeX LaTeX formulas and Markdown */}
                 <FormattedMessage content={msg.tekst} className="text-sm leading-7 text-slate-200" />
 
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800/60 pt-2 text-xs">
+                  <button type="button" aria-label="Polub wiadomość" aria-pressed={myReaction === 'up'} onClick={() => toggleReaction(messageKey, 'up')} className={`rounded-lg border p-2 ${myReaction === 'up' ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-slate-400'}`}><ThumbsUp className="h-4 w-4" /></button>
+                  <button type="button" aria-label="Nie lubię tej wiadomości" aria-pressed={myReaction === 'down'} onClick={() => toggleReaction(messageKey, 'down')} className={`rounded-lg border p-2 ${myReaction === 'down' ? 'border-rose-500 text-rose-300' : 'border-slate-700 text-slate-400'}`}><ThumbsDown className="h-4 w-4" /></button>
+                  <span className="text-slate-400">{myReaction ? `Operator: ${myReaction === 'up' ? '👍' : '👎'}` : 'Brak ocen'}</span>
+                </div>
                 {/* Attached Image/File preview in chat history */}
                 {msg.file && (
                   <div className="mt-2.5 pt-2 border-t border-slate-800/60">
