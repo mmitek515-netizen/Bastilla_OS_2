@@ -1,5 +1,5 @@
 import express from 'express';
-import { registerGptActions } from './src/lib/gptActions.mjs';
+import { registerGptActions, registerGptActionsGateway } from './src/lib/gptActions.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
@@ -150,6 +150,7 @@ const POLLINATIONS_API_KEY = rawEnvPollKey.startsWith('sk_')
   ? rawEnvPollKey
   : '';
 const app = express();
+const gptActionsPublicMode = registerGptActionsGateway(app);
 const portArgIndex = process.argv.indexOf('--port');
 const DEFAULT_PORT = Number(portArgIndex >= 0 ? process.argv[portArgIndex + 1] : process.env.PORT || 3000);
 const PORT = Number.isFinite(DEFAULT_PORT) && DEFAULT_PORT > 0 ? DEFAULT_PORT : 3000;
@@ -164,14 +165,19 @@ const requestedUploadLimit = Number(process.env.BASTILLA_UPLOAD_MAX_MB || 32);
 const uploadLimitMB = Number.isFinite(requestedUploadLimit)
   ? Math.max(1, Math.min(256, Math.floor(requestedUploadLimit)))
   : 32;
-app.use(express.json({ limit: `${uploadLimitMB}mb` }));
-app.use(express.urlencoded({ limit: `${uploadLimitMB}mb`, extended: true }));
+app.use(express.json({ limit: gptActionsPublicMode ? '64kb' : `${uploadLimitMB}mb` }));
+app.use(express.urlencoded({ limit: gptActionsPublicMode ? '64kb' : `${uploadLimitMB}mb`, extended: true }));
 
 app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (err?.type === 'entity.too.large' || err?.status === 413) {
     return res.status(413).json({
-      error: `Przesłane dane przekraczają limit serwera (${uploadLimitMB} MiB). Zmień BASTILLA_UPLOAD_MAX_MB lub wyślij mniejszy plik.`,
+      error: gptActionsPublicMode
+        ? 'Request body exceeds the 64 KiB public API limit.'
+        : `Przesłane dane przekraczają limit serwera (${uploadLimitMB} MiB). Zmień BASTILLA_UPLOAD_MAX_MB lub wyślij mniejszy plik.`,
     });
+  }
+  if (err?.type === 'entity.parse.failed' && _req.path.toLowerCase().startsWith('/api/gpt-actions/')) {
+    return res.status(400).json({ error: 'Invalid JSON request body.' });
   }
   next(err);
 });
@@ -6629,5 +6635,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
-

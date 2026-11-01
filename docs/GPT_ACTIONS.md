@@ -22,8 +22,9 @@ Integracja korzysta z REST API, bez MCP. Obsługuje Arię (wewnętrzny profil si
    PUBLIC_URL musi być samym origin HTTPS, bez ścieżki, parametrów i danych logowania. Nie wpisuj adresu edytora AI Studio ani localhost. W TOKEN ustaw nowy losowy sekret (co najmniej 32 znaki), np. wygenerowany lokalnie przez `openssl rand -hex 32`. Nie zapisuj sekretu w repozytorium ani kodzie przeglądarki. Jest to token BastillaOS, a nie klucz API OpenAI lub Google.
 
 2. Skonfiguruj działający model przez istniejące zmienne LLM_PROVIDERS, OLLAMA_* lub GEMINI_*/XAI_*.
-3. Wdróż i zrestartuj pełną aplikację. Host musi udostępniać API dla żądań serwerowych bez interaktywnego logowania Google. Samo udostępnienie podglądu AI Studio może nie wystarczyć.
-4. Pod adresem `https://TWOJ-PUBLICZNY-HOST/api/gpt-actions/openapi.json` powinien pojawić się JSON OpenAPI. Ścieżka nie zawiera MCP i nie wymaga tokenu do pobrania schematu.
+3. Wdróż i zrestartuj aplikację. Gdy `GPT_ACTIONS_PUBLIC_URL` jest ustawiony (oraz zawsze w trybie produkcyjnym), serwer włącza bramkę, która dopuszcza tylko `GET /api/gpt-actions/setup`, `GET /api/gpt-actions/openapi.json`, `GET /api/gpt-actions/status` i `POST /api/gpt-actions/message`. Pozostałe `/api/*`, `/mcp` i `/download` zwracają 404; interfejs i zasoby statyczne pozostają dostępne. W tym trybie inne funkcje wymagające API nie działają na tym publicznym hoście — użyj osobnego, prywatnego środowiska do pracy w pełnej aplikacji. Bramka ogranicza również JSON do 64 KiB.
+4. Host musi udostępniać API dla żądań serwerowych bez interaktywnego logowania Google. Samo udostępnienie podglądu AI Studio może nie wystarczyć.
+5. Pod adresem `https://TWOJ-PUBLICZNY-HOST/api/gpt-actions/openapi.json` powinien pojawić się JSON OpenAPI. Ścieżka nie zawiera MCP i nie wymaga tokenu do pobrania schematu.
 
 ## Konfiguracja własnego GPT
 
@@ -53,5 +54,12 @@ Brakujące wcześniej moduły jądra zostały przywrócone w repozytorium. Publi
 
 Otwórz **Połączenie ChatGPT** w bocznej nawigacji albo w menu **Więcej** na telefonie. Ekran odczytuje `/api/gpt-actions/setup`: pokazuje ustawienie publicznego adresu, obecność tokenu i konfigurację dostawców bez ujawniania sekretów. Gotowość konfiguracji nie oznacza udanego wywołania modelu. Ostateczny test wykonaj w edytorze GPT.
 
-Jeśli publikacja Google pokazuje „No billing setup” i brak kwalifikacji do Starter Tier, kod aplikacji nie może tego naprawić. Potrzebne jest środowisko publicznego hostingu z działającym backendem i modelem. Nie należy traktować przekierowania HTTP 302 do `__cookie_check.html` jako działającego API.
+Stany są celowo rozdzielone: zgodność strony z konfigurowanym originem HTTPS oznacza, że diagnostyka odpowiedziała pod tym adresem; odpowiedź modelu oznacza co najmniej jedno udane zapytanie od startu bieżącego procesu; połączenie z ChatGPT pozostaje niezweryfikowane do testu Action w edytorze własnego GPT. Te statusy nie dowodzą, że aplikacja jest stale dostępna.
 
+## Tymczasowy pilot w GitHub Codespaces
+
+`.devcontainer/devcontainer.json` używa Node 24, wykonuje `npm ci` przy tworzeniu kontenera i jawnie ustawia port 3000 jako prywatny. Uruchom `npm run verify`, następnie `npm run dev`. Przed zmianą widoczności portu właściciel musi ustawić `GPT_ACTIONS_PUBLIC_URL` i `GPT_ACTIONS_TOKEN` w sekretach Codespaces oraz skonfigurować dostawcę modelu. Publiczny adres musi być dokładnym originem HTTPS przekierowanego portu. Wtedy bramka GPT Actions blokuje inne API, ale tryb Codespaces nie jest usługą always-on. Po teście przywróć portowi widoczność prywatną i zatrzymaj Codespace.
+
+Właściciel musi sam zweryfikować z zewnątrz HTTPS, pobranie OpenAPI i odpowiedzi 401/429/502/503/504, a następnie zaimportować schemat do własnego prywatnego GPT i wykonać prawdziwe zapytanie. Testy lokalne z atrapą modelu nie potwierdzają działania zewnętrznego ani połączenia ChatGPT.
+
+Jeśli publikacja Google pokazuje „No billing setup” i brak kwalifikacji do Starter Tier, kod aplikacji nie może tego naprawić. Potrzebne jest środowisko publicznego hostingu z działającym backendem i modelem. Nie należy traktować przekierowania HTTP 302 do `__cookie_check.html` jako działającego API.

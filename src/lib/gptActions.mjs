@@ -3,6 +3,25 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 const AGENTS = ['Aria', 'Alex', 'Astyria', 'Aurelius'];
 const digest = (text) => createHash('sha256').update(text).digest();
 
+export function registerGptActionsGateway(app, env = process.env) {
+  if (env.NODE_ENV !== 'production' && !(env.GPT_ACTIONS_PUBLIC_URL || '').trim()) return false;
+  const allowed = new Set([
+    'GET /api/gpt-actions/setup',
+    'GET /api/gpt-actions/openapi.json',
+    'GET /api/gpt-actions/status',
+    'POST /api/gpt-actions/message',
+  ]);
+  app.use((req, res, next) => {
+    const pathname = req.path.toLowerCase().replace(/\/+$/, '') || '/';
+    const apiRoute = pathname === '/api' || pathname.startsWith('/api/');
+    if (!apiRoute && !['/download', '/mcp'].includes(pathname)) return next();
+    if (allowed.has(`${req.method} ${pathname}`)) return next();
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(404).json({ error: 'Not found.' });
+  });
+  return true;
+}
+
 export function gptActionsSchema(origin) {
   const url = new URL(origin);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
@@ -16,6 +35,10 @@ export function gptActionsSchema(origin) {
     content: { 'application/json': { schema: { type: 'object', properties } } },
   });
   const errors = Object.fromEntries([400, 401, 429, 502, 503, 504].map((code) => [String(code), result({ error: { type: 'string' } })]));
+  const authErrors = Object.fromEntries([401, 503].map((code) => [String(code), errors[String(code)]]));
+  const messageErrors = Object.fromEntries([400, 401, 413, 429, 502, 503, 504].map((code) => [
+    String(code), errors[String(code)] || result({ error: { type: 'string' } }),
+  ]));
   return {
     openapi: '3.1.0',
     info: { title: 'BastillaOS agents', version: '1.0.0', description: 'Consult BastillaOS AI agents for analysis, planning and code suggestions.' },
@@ -25,7 +48,7 @@ export function gptActionsSchema(origin) {
     paths: {
       '/api/gpt-actions/status': { get: {
         operationId: 'getBastillaAIStatus', summary: 'Check configured AI providers; this is not an inference health test.',
-        responses: { '200': result({ configured: { type: 'boolean' }, providers: { type: 'array', items: { type: 'string' } }, agents: { type: 'array', items: { type: 'string' } } }), ...errors },
+        responses: { '200': result({ configured: { type: 'boolean' }, providers: { type: 'array', items: { type: 'string' } }, agents: { type: 'array', items: { type: 'string' } } }), ...authErrors },
       } },
       '/api/gpt-actions/message': { post: {
         operationId: 'askBastillaAgent', summary: 'Ask Aria or another BastillaOS agent for analysis or proposed code.',
@@ -37,7 +60,7 @@ export function gptActionsSchema(origin) {
             message: { type: 'string', minLength: 1, maxLength: 12000 },
           },
         } } } },
-        responses: { '200': result({ success: { type: 'boolean' }, agent: { type: 'string' }, reply: { type: 'string' }, engine: { type: 'string' }, truncated: { type: 'boolean' } }), ...errors },
+        responses: { '200': result({ success: { type: 'boolean' }, agent: { type: 'string' }, reply: { type: 'string' }, engine: { type: 'string' }, truncated: { type: 'boolean' } }), ...messageErrors },
       } },
     },
   };
@@ -49,6 +72,7 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
   let schema;
   try { schema = gptActionsSchema((env.GPT_ACTIONS_PUBLIC_URL || '').trim()); } catch {}
   let active = 0;
+  let modelResponded = false;
   app.get('/api/gpt-actions/setup', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const current = providers();
@@ -61,6 +85,7 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
       providers: current,
       agents: AGENTS,
       readyForExternalTest: Boolean(schema && token.length >= 32 && current.length),
+      modelResponseVerified: modelResponded,
       externalConnectionVerified: false,
     });
   });
@@ -99,6 +124,7 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
       const agent = body.agent ?? 'Aria';
       const result = await Promise.race([chat(agent, body.message.trim(), controller.signal), deadline]);
       if (!result || typeof result.text !== 'string' || !result.text.trim()) throw new Error('empty reply');
+      modelResponded = true;
       return res.json({ success: true, agent, reply: result.text.slice(0, 12000), engine: `${result.provider}:${result.model}`, truncated: result.text.length > 12000 });
     } catch {
       return res.status(controller.signal.aborted ? 504 : 502).json({ error: controller.signal.aborted ? 'AI request timed out. It was not retried.' : 'AI provider failed. Check server logs/configuration.' });
@@ -108,4 +134,3 @@ export function registerGptActions(app, { chat, providers, env = process.env, ti
     }
   });
 }
-

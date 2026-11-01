@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gptActionsSchema, registerGptActions } from '../src/lib/gptActions.mjs';
+import { gptActionsSchema, registerGptActions, registerGptActionsGateway } from '../src/lib/gptActions.mjs';
 
 const token = 'test-token-012345678901234567890123456789';
 function harness(options = {}) {
   const routes = new Map();
+  const middleware = [];
   const calls = [];
   const app = Object.fromEntries(['get', 'post'].map((method) => [method, (path, ...handlers) => routes.set(`${method} ${path}`, handlers)]));
+  app.use = (handler) => middleware.push(handler);
+  app.get('/api/apps/list', (_req, res) => res.status(200).json({ apps: [] }));
+  app.get('/', (_req, res) => res.status(200).json({ page: 'app' }));
+  registerGptActionsGateway(app, options.env || { GPT_ACTIONS_PUBLIC_URL: 'https://bastilla.example' });
   registerGptActions(app, {
     env: { GPT_ACTIONS_TOKEN: token, GPT_ACTIONS_PUBLIC_URL: 'https://bastilla.example' },
     providers: () => ['ollama'],
@@ -15,8 +20,14 @@ function harness(options = {}) {
   });
   return { calls, async request(method, path, body, auth = `Bearer ${token}`) {
     const res = { code: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } };
-    const req = { body, get: (key) => key === 'authorization' ? auth : 'attacker.example' };
-    for (const handler of routes.get(`${method} /api/gpt-actions/${path}`)) {
+    const requestPath = path.startsWith('/') ? path : `/api/gpt-actions/${path}`;
+    const req = { body, method: method.toUpperCase(), path: requestPath, get: (key) => key === 'authorization' ? auth : 'attacker.example' };
+    for (const handler of middleware) {
+      let next = false;
+      handler(req, res, () => { next = true; });
+      if (!next) return res;
+    }
+    for (const handler of routes.get(`${method} ${requestPath}`) || []) {
       let next = false;
       await handler(req, res, () => { next = true; });
       if (!next) break;
@@ -32,6 +43,8 @@ test('OpenAPI uses configured HTTPS origin and supported agent operations', asyn
   assert.equal(r.body.servers[0].url, 'https://bastilla.example');
   assert.deepEqual(Object.keys(r.body.paths).sort(), ['/api/gpt-actions/message', '/api/gpt-actions/status']);
   assert.ok(r.body.security[0].bearerAuth);
+  assert.deepEqual(Object.keys(r.body.paths['/api/gpt-actions/status'].get.responses).sort(), ['200', '401', '503']);
+  assert.ok(['400', '401', '413', '429', '502', '503', '504'].every((code) => code in r.body.paths['/api/gpt-actions/message'].post.responses));
   for (const origin of ['http://host', 'https://user:pass@host', 'https://host/path', 'https://host/?token=secret']) assert.throws(() => gptActionsSchema(origin));
   assert.throws(() => gptActionsSchema('https://ais-dev-example-123.europe-west2.run.app'));
 });
@@ -40,6 +53,7 @@ test('setup diagnoses missing settings without disclosing the token or claiming 
   const r = await h.request('get', 'setup');
   assert.equal(r.body.readyForExternalTest, true);
   assert.equal(r.body.externalConnectionVerified, false);
+  assert.equal(r.body.modelResponseVerified, false);
   assert.ok(!JSON.stringify(r.body).includes(token));
   const missing = await harness({ env: {}, providers: () => [] }).request('get', 'setup');
   assert.equal(missing.body.readyForExternalTest, false);
@@ -64,6 +78,29 @@ test('Aria default and selected agent use actual model callback', async () => {
   assert.ok(h.calls[0][2] instanceof AbortSignal);
   await h.request('post', 'message', { message: 'test', agent: 'Alex' });
   assert.equal(h.calls[1][0], 'Alex');
+  assert.equal((await h.request('get', 'setup')).body.modelResponseVerified, true);
+});
+test('public gateway exposes only the GPT Actions endpoints', async () => {
+  const h = harness();
+  for (const [method, path] of [
+    ['get', '/api/apps/list'], ['post', '/api/apps/execute'],
+    ['post', '/api/kernel/command'], ['post', '/api/mcp'], ['get', '/download'],
+    ['post', '/API/APPS/EXECUTE'], ['post', '/API/KERNEL/COMMAND'],
+    ['get', '/DOWNLOAD/'], ['post', '/MCP'],
+    ['delete', '/api/gpt-actions/message'],
+  ]) {
+    assert.equal((await h.request(method, path, { command: 'id' })).code, 404, `${method} ${path}`);
+  }
+  assert.equal(h.calls.length, 0);
+  assert.equal((await h.request('get', '/')).code, 200);
+  assert.equal((await h.request('get', 'openapi.json')).code, 200);
+  assert.equal((await h.request('get', 'setup')).code, 200);
+});
+test('gateway remains disabled in local development unless a public origin is configured', async () => {
+  const local = harness({ env: { NODE_ENV: 'development' } });
+  assert.equal((await local.request('get', '/api/apps/list')).code, 200);
+  const production = harness({ env: { NODE_ENV: 'production' } });
+  assert.equal((await production.request('get', '/api/apps/list')).code, 404);
 });
 test('malformed, oversized, unknown-agent and extra-field requests are rejected', async () => {
   const h = harness();
@@ -82,6 +119,7 @@ test('provider failures do not leak credentials or pretend to succeed', async ()
   const r = await h.request('post', 'message', { message: 'test' });
   assert.equal(r.code, 502);
   assert.ok(!JSON.stringify(r.body).includes('secret-api-key'));
+  assert.equal((await h.request('get', 'setup')).body.modelResponseVerified, false);
 });
 test('slow model times out and receives cancellation', async () => {
   let signal;
@@ -103,4 +141,3 @@ test('response is bounded; concurrent overload is rejected', async () => {
   for (const resolve of resolvers) resolve({ text: 'OK', provider: 'ollama', model: 'local' });
   await Promise.all([first, second]);
 });
-

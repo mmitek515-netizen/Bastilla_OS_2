@@ -9,6 +9,9 @@ interface Setup {
   providers: string[];
   agents: string[];
   readyForExternalTest: boolean;
+  publicOrigin: string | null;
+  modelResponseVerified: boolean;
+  externalConnectionVerified: boolean;
 }
 
 export function GPTActionsView() {
@@ -40,6 +43,9 @@ export function GPTActionsView() {
     catch { setError('Nie udało się skopiować. Zaznacz i skopiuj adres poniżej.'); }
   };
   const preview = /^ais-(dev|pre)-.*\.run\.app$/i.test(window.location.hostname);
+  const httpsOriginVerified = Boolean(setup?.publicOrigin
+    && window.location.protocol === 'https:'
+    && window.location.origin === setup.publicOrigin);
   return (
     <section className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-6">
       <div className="mx-auto max-w-3xl space-y-5">
@@ -58,7 +64,13 @@ export function GPTActionsView() {
               {[[setup.publicUrlConfigured, 'Publiczny adres HTTPS'], [setup.tokenConfigured, 'Token API (minimum 32 znaki)'], [setup.providerConfigured, 'Skonfigurowany dostawca AI']].map(([ok, label]) => <li key={String(label)} className="flex items-center gap-2">{ok ? <Check className="h-4 w-4 shrink-0 text-emerald-400" /> : <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />}<span>{label}: <strong>{ok ? 'ustawiono' : 'brak'}</strong></span></li>)}
             </ul>
             <p className="mt-4 text-sm text-slate-300">{setup.readyForExternalTest ? 'Konfiguracja gotowa do testu w edytorze GPT.' : 'Uzupełnij brakujące ustawienia w sekretach serwera i uruchom aplikację ponownie.'}</p>
-            <p className="mt-2 text-xs text-slate-400">Ten ekran nie potwierdza połączenia z ChatGPT ani odpowiedzi modelu. Potwierdzi je dopiero udany test Action.</p>
+            <h2 className="mb-3 mt-5 font-semibold">Testy połączenia</h2>
+            <ul className="space-y-3 text-sm">
+              <li>HTTPS i origin: <strong>{httpsOriginVerified ? 'API odpowiedziało przez skonfigurowany HTTPS origin' : 'niepotwierdzone dla skonfigurowanego origin'}</strong></li>
+              <li>Odpowiedź modelu: <strong>{setup.modelResponseVerified ? 'otrzymano odpowiedź od uruchomienia serwera' : 'niepotwierdzona'}</strong></li>
+              <li>Połączenie ChatGPT: <strong>{setup.externalConnectionVerified ? 'potwierdzone' : 'niezweryfikowane — przetestuj Action w edytorze GPT'}</strong></li>
+            </ul>
+            <p className="mt-3 text-xs text-slate-400">Odpowiedź modelu oznacza udane zapytanie od startu procesu, nie bieżący test zdrowia. Ten ekran nie potwierdza wywołania przez ChatGPT.</p>
           </div>
           <div className="rounded-xl border border-slate-700 bg-slate-900 p-4">
             <h2 className="mb-3 font-semibold">Dodaj do własnego GPT</h2>
