@@ -6,8 +6,8 @@ export interface SyncCheck { domain: SyncDomain; state: SyncCheckState; detail: 
 /** Read-only synchronization status. Never reports external writes without proof. */
 export function buildSyncReport(kernelFresh: boolean): SyncCheck[] {
   return SYNC_DOMAINS.map(domain => {
-    if (kernelFresh && (domain === 'chat' || domain === 'agents')) {
-      return { domain, state: 'confirmed', detail: 'Odczytano aktualny stan jądra z serwera; nie potwierdza synchronizacji innych urządzeń.' };
+    if (kernelFresh && domain === 'chat') {
+      return { domain, state: 'confirmed', detail: 'Odczytano stan czatu z jądra; nie potwierdza zapisu, replikacji ani synchronizacji innych urządzeń.' };
     }
     return { domain, state: kernelFresh ? 'unavailable' : 'failed', detail: kernelFresh
       ? 'Brak potwierdzonej synchronizacji tego modułu.'
