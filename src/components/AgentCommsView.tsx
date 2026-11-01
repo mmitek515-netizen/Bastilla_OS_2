@@ -56,6 +56,38 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   onUnclog,
   onRestoreBackup,
 }) => {
+  // Local conversation views preserve the server's append-only history.
+  // They do not create independent backend conversations or delete server messages.
+  type ConversationView = { id: string; title: string; start: number; end?: number; hidden?: boolean };
+  const storageKey = 'bastilla_chat_conversation_views_v1';
+  const [conversationViews, setConversationViews] = useState<ConversationView[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+      if (Array.isArray(saved) && saved.length && saved.every(v => typeof v.id === 'string' && typeof v.start === 'number')) return saved;
+    } catch { /* invalid local data */ }
+    return [{ id: 'initial', title: 'Dotychczasowa rozmowa', start: 0 }];
+  });
+  const [activeConversationId, setActiveConversationId] = useState(() => {
+    try { return localStorage.getItem(storageKey + '_active') || 'initial'; } catch { return 'initial'; }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(conversationViews));
+      localStorage.setItem(storageKey + '_active', activeConversationId);
+    } catch { /* storage unavailable */ }
+  }, [conversationViews, activeConversationId]);
+  const activeConversation = conversationViews.find(v => v.id === activeConversationId) ?? conversationViews[0];
+  const visibleMessages = dataStore.chat_history.slice(activeConversation?.start ?? 0, activeConversation?.end).filter(() => !activeConversation?.hidden);
+  const startNewConversation = () => {
+    if (isLoading) return;
+    const next: ConversationView = { id: String(Date.now()) + '-' + Math.random().toString(36).slice(2), title: 'Nowy czat ' + new Date().toLocaleString('pl-PL'), start: dataStore.chat_history.length };
+    setConversationViews(prev => prev.map(v => v.id === activeConversationId && v.end === undefined ? {...v, end: dataStore.chat_history.length} : v).concat(next));
+    setActiveConversationId(next.id);
+  };
+  const clearCurrentConversation = () => {
+    if (isLoading || !window.confirm('Ukryć wiadomości tej rozmowy w tym urządzeniu? Historia na serwerze pozostanie bez zmian.')) return;
+    setConversationViews(prev => prev.map(v => v.id === activeConversationId ? { ...v, hidden: true } : v));
+  };
   const [selectedTarget, setSelectedTarget] = useState<'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'si_1'>('triad');
   const [selectedCommand, setSelectedCommand] = useState<AgentProtocolCommand>('SYSTEM_STATUS');
   const [signal, setSignal] = useState('');
@@ -383,7 +415,16 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               Nie udało się wysłać żądania: {sendError}
             </div>
           )}
-          {dataStore.chat_history.map((msg, idx) => {
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/80 p-2">
+            <button type="button" disabled={isLoading} onClick={startNewConversation} className="rounded-lg bg-cyan-900/50 px-3 py-2 text-xs font-semibold text-cyan-100 disabled:opacity-50">+ Nowy czat</button>
+            <label className="text-xs text-slate-400" htmlFor="conversation-history">Historia</label>
+            <select id="conversation-history" value={activeConversationId} disabled={isLoading} onChange={event => setActiveConversationId(event.target.value)} className="min-w-0 max-w-full flex-1 rounded-lg border border-slate-600 bg-slate-950 p-2 text-xs text-slate-100">
+              {conversationViews.map(view => <option key={view.id} value={view.id}>{view.title}</option>)}
+            </select>
+            <button type="button" disabled={isLoading} onClick={clearCurrentConversation} className="rounded-lg border border-rose-800/60 px-3 py-2 text-xs text-rose-300 disabled:opacity-50">Wyczyść widok</button>
+          </div>
+          <p className="text-xs text-slate-500">Rozmowy są podzielone lokalnie w tej przeglądarce. Historia serwera i kontekst agentów pozostają wspólne.</p>
+          {visibleMessages.map((msg, idx) => {
             const agentKey = msg.agent === OPERATOR_NAME ? 'Operator' : msg.agent;
             const profile: AgentProfile | undefined = SYSTEM_AGENTS[agentKey] || SYSTEM_AGENTS[msg.agent];
             const isOperator = msg.agent === OPERATOR_NAME || msg.agent === 'Operator';
