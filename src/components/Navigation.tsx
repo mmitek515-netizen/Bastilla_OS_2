@@ -35,9 +35,9 @@ export const TAB_IDS: readonly TabId[] = [
 export function initialTabFromLocation(): TabId {
   try {
     const view = new URLSearchParams(window.location.search).get('view');
-    return view && (TAB_IDS as readonly string[]).includes(view) ? (view as TabId) : 'home';
+    return view && (TAB_IDS as readonly string[]).includes(view) ? (view as TabId) : 'terminal';
   } catch {
-    return 'home';
+    return 'terminal';
   }
 }
 
@@ -216,19 +216,20 @@ export const Navigation: React.FC<NavigationProps> = ({
             </button>
           );
         })}
-        <label className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 lg:mt-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 ${isSecondaryActive ? 'bg-cyan-950/50 text-cyan-100' : 'bg-slate-900 text-cyan-200'}`}>
+        <div className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 lg:mt-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 ${isSecondaryActive ? 'bg-cyan-950/50 text-cyan-100' : 'bg-slate-900 text-cyan-200'}`}>
           <Plug className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="w-full truncate text-center text-[10px] lg:text-left lg:text-[11px]">Więcej</span>
+          <label htmlFor="bastilla-more-modules" className="w-full truncate text-center text-[10px] lg:text-left lg:text-[11px]">Więcej</label>
           <select
-            aria-label="Pozostałe moduły BastillaOS"
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            id="bastilla-more-modules"
+            aria-label="Więcej — wybierz moduł BastillaOS"
+            className="absolute inset-0 h-full w-full cursor-pointer rounded-xl opacity-0 focus-visible:opacity-100 focus-visible:bg-slate-950 focus-visible:text-white"
             value={isSecondaryActive ? activeTab : ''}
             onChange={(event) => { if (event.target.value) onSelectTab(event.target.value as TabId); }}
           >
             <option value="" disabled>Wybierz moduł</option>
             {secondaryTabs.map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
           </select>
-        </label>
+        </div>
       </div>
       <div className="hidden border-t border-blue-200/10 p-3 text-[9px] font-mono text-blue-200/40 lg:block">
         BASTILLAOS · DEBIAN 13
