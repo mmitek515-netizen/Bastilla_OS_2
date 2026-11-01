@@ -86,7 +86,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   };
   const clearCurrentConversation = () => {
     if (isLoading || !window.confirm('Ukryć wiadomości tej rozmowy w tym urządzeniu? Historia na serwerze pozostanie bez zmian.')) return;
-    setConversationViews(prev => prev.map(v => v.id === activeConversationId ? { ...v, hidden: true } : v));
+    startNewConversation();
   };
   const [selectedTarget, setSelectedTarget] = useState<'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'si_1'>('triad');
   const [selectedCommand, setSelectedCommand] = useState<AgentProtocolCommand>('SYSTEM_STATUS');
@@ -178,6 +178,10 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
       ? messageText
       : messageText.trim();
     if ((!message && chatAttachments.length === 0) || isLoading) return;
+    if (activeConversation?.end !== undefined) {
+      setAttachmentError('To archiwalna rozmowa. Wybierz „Nowy czat”, aby wysłać wiadomość.');
+      return;
+    }
     try {
       await onSendMessage(message, selectedTarget, chatAttachments);
       setMessageText('');
@@ -423,7 +427,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             </select>
             <button type="button" disabled={isLoading} onClick={clearCurrentConversation} className="rounded-lg border border-rose-800/60 px-3 py-2 text-xs text-rose-300 disabled:opacity-50">Wyczyść widok</button>
           </div>
-          <p className="text-xs text-slate-500">Rozmowy są podzielone lokalnie w tej przeglądarce. Historia serwera i kontekst agentów pozostają wspólne.</p>
+          <p className="text-xs text-slate-500">Rozmowy są podzielone lokalnie w tej przeglądarce. „Wyczyść widok” rozpoczyna pustą rozmowę bez usuwania danych. Historia serwera i kontekst agentów pozostają wspólne.</p>
           {visibleMessages.map((msg, idx) => {
             const agentKey = msg.agent === OPERATOR_NAME ? 'Operator' : msg.agent;
             const profile: AgentProfile | undefined = SYSTEM_AGENTS[agentKey] || SYSTEM_AGENTS[msg.agent];
