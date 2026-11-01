@@ -64,6 +64,14 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   const [mobileSection, setMobileSection] = useState<'chat' | 'agents'>('chat');
   const [showProtocolTools, setShowProtocolTools] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const [showActivity, setShowActivity] = useState(true);
+  const [activityElapsed, setActivityElapsed] = useState(0);
+  useEffect(() => {
+    if (!isLoading) { setActivityStartedAt(null); setActivityElapsed(0); return; }
+    const started = Date.now();
+    const interval = window.setInterval(() => setActivityElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(interval);
+  }, [isLoading]);
   const followLatestMessagesRef = useRef(true);
   const transmissionStatus = sendError
     ? { label: 'BŁĄD TRANSMISJI', color: 'rose' }
@@ -425,20 +433,26 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
           })}
 
           {isLoading && (
-            <div className="flex flex-wrap items-center justify-between gap-2 text-slate-300 p-3 bg-slate-900/70 rounded-lg border border-slate-800">
-              <div className="flex items-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                <span className="text-xs">Asystent przygotowuje odpowiedź…</span>
-              </div>
-              {onForceSync && (
-                <button
-                  onClick={onForceSync}
-                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-[11px] cursor-pointer transition"
-                >
-                  Odśwież stan
+            <section aria-label="Aktywność asystenta" aria-live="polite" className="rounded-2xl border border-slate-700 bg-slate-900/80 p-3 sm:p-4 text-slate-200">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="h-4 w-4 animate-spin text-cyan-400" aria-hidden="true" />
+                  <span className="font-semibold">{selectedTarget === 'triad' ? 'Wspólny czat agentów' : selectedTarget === 'si_1' ? 'Aria' : selectedTarget} · przetwarzanie żądania</span>
+                </div>
+                <button type="button" onClick={() => setShowActivity(v => !v)} aria-expanded={showActivity} className="rounded-lg px-3 py-1 text-xs text-cyan-300 hover:bg-slate-800">
+                  {showActivity ? 'Ukryj szczegóły' : 'Pokaż szczegóły'}
                 </button>
+              </div>
+              {showActivity && (
+                <ol className="mt-3 space-y-2 border-l border-slate-600 pl-4 text-xs sm:text-sm">
+                  <li><span className="text-emerald-400">✓</span> Żądanie wysłane z czatu</li>
+                  <li className="flex items-center gap-2"><RefreshCw className="h-3.5 w-3.5 animate-spin text-cyan-400" aria-hidden="true" /> Oczekiwanie na odpowiedź serwera · {activityElapsed} s</li>
+                  <li className="text-slate-400">Wynik zostanie wyświetlony w rozmowie po zakończeniu żądania</li>
+                </ol>
               )}
-            </div>
+              <p className="mt-3 text-xs text-slate-500">Widoczne są tylko potwierdzone etapy żądania. Szczegółowe operacje narzędzi i GitHub wymagają zdarzeń audytu z backendu; panel nie symuluje ich wykonania.</p>
+              {onForceSync && <button type="button" onClick={onForceSync} className="mt-2 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-cyan-300 hover:bg-slate-800">Odśwież stan</button>}
+            </section>
           )}
 
         </div>
