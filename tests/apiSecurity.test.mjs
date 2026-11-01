@@ -20,7 +20,7 @@ function request(security, { method = 'POST', path = '/api/apps/create', authori
 }
 
 test('public API access fails closed without a strong configured token', () => {
-  for (const tokenValue of ['', 'short-token']) {
+  for (const tokenValue of ['', 'short-token', 'x'.repeat(257)]) {
     assert.throws(() => createApiSecurity({ host: '0.0.0.0', token: tokenValue, isProduction: true }), /BASTILLA_API_TOKEN/);
   }
   assert.throws(() => createApiSecurity({ host: '0.0.0.0', token }), /disabled outside production/);

@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
 const PUBLICLY_AUTHENTICATED_GPT_ROUTES = new Set([
@@ -7,8 +7,6 @@ const PUBLICLY_AUTHENTICATED_GPT_ROUTES = new Set([
   '/api/gpt-actions/setup',
   '/api/gpt-actions/openapi.json',
 ]);
-const digest = (value) => createHash('sha256').update(value).digest();
-
 export function createApiSecurity({ host, token, isProduction }) {
   const bindHost = String(host || '').trim().toLowerCase();
   const apiToken = String(token || '').trim();
@@ -18,8 +16,8 @@ export function createApiSecurity({ host, token, isProduction }) {
   if (!isLoopback && !isProduction) {
     throw new Error('Non-loopback API binding is disabled outside production mode.');
   }
-  if (!isLoopback && !/^[\x21-\x7e]{32,}$/.test(apiToken)) {
-    throw new Error('Public API binding requires BASTILLA_API_TOKEN with at least 32 non-whitespace characters.');
+  if (!isLoopback && !/^[\x21-\x7e]{32,256}$/.test(apiToken)) {
+    throw new Error('Public API binding requires BASTILLA_API_TOKEN with 32–256 non-whitespace characters.');
   }
 
   return {
@@ -33,9 +31,12 @@ export function createApiSecurity({ host, token, isProduction }) {
         return next();
       }
 
-      const supplied = req.get('authorization') || '';
-      const expected = ['Be', 'arer ', apiToken].join('');
-      if (!timingSafeEqual(digest(supplied), digest(expected))) {
+      const supplied = Buffer.from(req.get('authorization') || '');
+      const expected = Buffer.from(['Be', 'arer ', apiToken].join(''));
+      const comparable = Buffer.alloc(expected.length);
+      supplied.copy(comparable, 0, 0, expected.length);
+      const authorized = timingSafeEqual(comparable, expected) && supplied.length === expected.length;
+      if (!authorized) {
         res.setHeader('WWW-Authenticate', 'Bearer');
         return res.status(401).json({ error: 'A valid bearer token is required for public API access.' });
       }

@@ -4,7 +4,7 @@
 
 Use Node.js 24. Run `npm ci`, then `npm run dev` on port 3000. The API binds to
 `127.0.0.1` by default. Non-loopback binding is disabled outside production and
-requires `BASTILLA_API_TOKEN` with at least 32 non-whitespace characters.
+requires `BASTILLA_API_TOKEN` with 32–256 non-whitespace characters.
 Every `/api` endpoint, `/mcp`, and `/download` then requires that bearer token,
 except GPT Actions status/message routes, which enforce their own token, and
 setup/schema metadata routes. Agent-task and inbox tokens remain independently
