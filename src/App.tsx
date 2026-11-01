@@ -400,6 +400,28 @@ export default function App() {
     chatAgent: AgentProtocolRequest['agent'] = 'triad',
     attachments: ChatAttachment[] = [],
   ) => {
+    // /sync refreshes the authoritative kernel state and reports the actual scope.
+    // It does NOT silently commit, push or deploy uncommitted project changes.
+    if (attachments.length === 0 && /^(?:\\/sync|sync|synchronizuj(?:\\s+ca(?:ł|l)\\w*\\s+aplikacj\\w*)?)\\s*[.!]?$/iu.test(message.trim())) {
+      setIsAgentLoading(true);
+      setAgentError(null);
+      try {
+        const response = await fetch('/api/kernel/state?fresh=1', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Odczyt stanu zakończył się HTTP ${response.status}`);
+        const payload = await response.json();
+        if (!payload?.store || typeof payload.store !== 'object') throw new Error('Serwer nie zwrócił poprawnego stanu systemu');
+        const normalized = normalizeDataStore(payload.store);
+        setDataStore(normalized);
+        setStreamedReply('SYNC: odświeżono stan jądra i czatu z serwera. Synchronizacja plików projektów, baz danych, GitHub, AI Studio i wdrożeń nie została potwierdzona — te integracje wymagają osobnych mechanizmów.');
+      } catch (error) {
+        const details = error instanceof Error ? error.message : String(error);
+        setAgentError(`SYNC nie powiódł się: ${details}`);
+        setStreamedReply('SYNC: nie udało się odświeżyć danych. Nie potwierdzono synchronizacji.');
+      } finally {
+        setIsAgentLoading(false);
+      }
+      return;
+    }
     const protocolCommand = attachments.length === 0
       ? parseChatProtocolCommand(message, chatAgent)
       : null;
