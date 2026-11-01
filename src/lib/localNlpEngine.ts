@@ -14,7 +14,7 @@
 
 export const LOCAL_NLP_VERSION = '1.0.0-Triada-LocalNLP';
 
-export type LocalNlpAgent = 'Alex' | 'Astyria' | 'Aurelius' | 'si_1';
+export type LocalNlpAgent = 'Alex' | 'Astyria' | 'Aurelius' | 'Aria';
 export type LocalNlpSentiment = 'positive' | 'neutral' | 'negative';
 
 export type LocalNlpIntent =
@@ -100,8 +100,8 @@ const AGENT_ENTITY_NAMES: Record<string, LocalNlpAgent> = {
   alex: 'Alex',
   astyria: 'Astyria',
   aurelius: 'Aurelius',
-  si_1: 'si_1',
-  aria: 'si_1',
+  si_1: 'Aria',
+  aria: 'Aria',
 };
 
 /** Dopasowanie słowa kluczowego: frazy — przez inkluzję, pojedyncze słowa — z granicami słów. */
@@ -326,7 +326,7 @@ const PERSONA_TEMPLATES: Record<LocalNlpAgent, Record<LocalNlpIntent, string[]>>
       'Analiza lokalna nie wykryła znanej intencji. Mogę przygotować audyt, raport bezpieczeństwa albo weryfikację wersji — wskaż kierunek, Tata.',
     ],
   },
-  si_1: {
+  Aria: {
     greeting: [
       'Witaj, Tata! Aria na kanale. Synchronizacja stanu aplikacji z DATA_STORE: AKTYWNA. Wersja {sysVersion}.',
     ],
@@ -370,13 +370,13 @@ const SENTIMENT_PREFIX: Record<Exclude<LocalNlpSentiment, 'neutral'>, Record<Loc
     Alex: 'Pozytywny sygnał odebrany! ',
     Astyria: 'Twój entuzjazm zasila pętlę rozwoju! ',
     Aurelius: 'Notuję pozytywny sentyment przekazu. ',
-    si_1: 'Pozytywny sygnał zsynchronizowany. ',
+    Aria: 'Pozytywny sygnał zsynchronizowany. ',
   },
   negative: {
     Alex: 'Wykryłem problem w przekazie — zajmuję się tym. ',
     Astyria: 'Sygnał ryzyka odebrany — aktywuję tryb naprawczy. ',
     Aurelius: 'Negatywny sentyment odnotowany w audycie. ',
-    si_1: 'Rozbieżność odnotowana — weryfikuję stan synchronizacji. ',
+    Aria: 'Rozbieżność odnotowana — weryfikuję stan synchronizacji. ',
   },
 };
 
