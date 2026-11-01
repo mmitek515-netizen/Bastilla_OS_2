@@ -22,7 +22,7 @@ Integracja korzysta z REST API, bez MCP. Obsługuje Arię (wewnętrzny profil si
    PUBLIC_URL musi być samym origin HTTPS, bez ścieżki, parametrów i danych logowania. Nie wpisuj adresu edytora AI Studio ani localhost. W TOKEN ustaw nowy losowy sekret (co najmniej 32 znaki), np. wygenerowany lokalnie przez `openssl rand -hex 32`. Nie zapisuj sekretu w repozytorium ani kodzie przeglądarki. Jest to token BastillaOS, a nie klucz API OpenAI lub Google.
 
 2. Skonfiguruj działający model przez istniejące zmienne LLM_PROVIDERS, OLLAMA_* lub GEMINI_*/XAI_*.
-3. Wdróż i zrestartuj pełną aplikację. Host musi udostępniać API dla żądań serwerowych bez interaktywnego logowania Google. Samo udostępnienie podglądu AI Studio może nie wystarczyć.
+3. Uruchom serwer z tymi zmiennymi i `BASTILLA_HOST=0.0.0.0`, jeśli hosting wymaga nasłuchiwania na wszystkich interfejsach. Ustawienie `GPT_ACTIONS_PUBLIC_URL` włącza ograniczony tryb publiczny: dostępne są wyłącznie setup, schemat OpenAPI, status i wiadomość GPT Actions; wszystkie pozostałe trasy (w tym interfejs, stare MCP i endpointy zapisu) zwracają 403. Host musi udostępniać API dla żądań serwerowych bez interaktywnego logowania Google. Samo udostępnienie podglądu AI Studio może nie wystarczyć.
 4. Pod adresem `https://TWOJ-PUBLICZNY-HOST/api/gpt-actions/openapi.json` powinien pojawić się JSON OpenAPI. Ścieżka nie zawiera MCP i nie wymaga tokenu do pobrania schematu.
 
 ## Konfiguracja własnego GPT
@@ -48,10 +48,10 @@ To konfiguracja osobnego własnego GPT. Nie dodaje automatycznie narzędzia do w
 `node --test tests/gpt-actions.test.mjs` testuje schemat, uwierzytelnianie, walidację, wybór agenta, timeout, limit współbieżności, błędy i wielkość odpowiedzi z atrapą dostawcy. Nie stanowi dowodu połączenia z wdrożonym AI.
 
 Brakujące wcześniej moduły jądra zostały przywrócone w repozytorium. Publiczny host i prawdziwy token nadal trzeba skonfigurować w środowisku wdrożenia. Nie używaj adresów ais-dev- ani ais-pre-: podgląd AI Studio wymaga ciasteczek przeglądarki, których GPT Actions nie zastępuje. Walidator odrzuca takie adresy.
+Tryb publiczny celowo nie udostępnia pełnej aplikacji. Nie publikuj portu bez tej listy tras ani bez odrębnego przeglądu wszystkich endpointów.
 
 ## Diagnostyka w interfejsie
 
 Otwórz **Połączenie ChatGPT** w bocznej nawigacji albo w menu **Więcej** na telefonie. Ekran odczytuje `/api/gpt-actions/setup`: pokazuje ustawienie publicznego adresu, obecność tokenu i konfigurację dostawców bez ujawniania sekretów. Gotowość konfiguracji nie oznacza udanego wywołania modelu. Ostateczny test wykonaj w edytorze GPT.
 
 Jeśli publikacja Google pokazuje „No billing setup” i brak kwalifikacji do Starter Tier, kod aplikacji nie może tego naprawić. Potrzebne jest środowisko publicznego hostingu z działającym backendem i modelem. Nie należy traktować przekierowania HTTP 302 do `__cookie_check.html` jako działającego API.
-

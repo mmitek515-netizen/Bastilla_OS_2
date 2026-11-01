@@ -1,5 +1,6 @@
 import express from 'express';
 import { registerGptActions } from './src/lib/gptActions.mjs';
+import { createPublicActionsGuard } from './src/lib/publicActionsGuard.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
@@ -153,9 +154,16 @@ const app = express();
 const portArgIndex = process.argv.indexOf('--port');
 const DEFAULT_PORT = Number(portArgIndex >= 0 ? process.argv[portArgIndex + 1] : process.env.PORT || 3000);
 const PORT = Number.isFinite(DEFAULT_PORT) && DEFAULT_PORT > 0 ? DEFAULT_PORT : 3000;
+const HOST = (process.env.BASTILLA_HOST || '127.0.0.1').trim();
+const publicActionsMode = Boolean((process.env.GPT_ACTIONS_PUBLIC_URL || '').trim());
+if (!['localhost', '127.0.0.1', '::1'].includes(HOST) && !publicActionsMode) {
+  throw new Error('Public binding is disabled. Configure GPT_ACTIONS_PUBLIC_URL to expose only authenticated GPT Actions routes.');
+}
 let activeServerPort = PORT;
 const PYTHON_SCRIPT_PATH = path.resolve('svl_kernel.py');
 const KERNEL_STORE_PATH = path.resolve(process.env.SVL_KERNEL_STORE_PATH || '.svl_kernel_store.json');
+
+app.use(createPublicActionsGuard(publicActionsMode));
 
 // Configurable request size for binary attachments encoded as base64 in JSON.
 // Keep a finite bound to prevent accidental out-of-memory crashes or denial of service.
@@ -6119,7 +6127,6 @@ app.get('/api/mcp/sse', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
 
   const sessionId = randomUUID();
   const endpoint = `/api/mcp?sessionId=${sessionId}`;
@@ -6149,7 +6156,6 @@ registerGptActions(app, {
 
 // OpenAPI 3.0 schema for ChatGPT Custom GPT Actions
 app.get('/api/mcp/openapi.json', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
   const origin = `${req.protocol}://${req.get('host')}`;
   return res.json({
     openapi: '3.0.0',
@@ -6230,10 +6236,6 @@ app.get('/api/mcp/openapi.json', (req, res) => {
 
 // MCP JSON-RPC 2.0 endpoint (ChatGPT / Claude / Cursor MCP)
 app.all(['/api/mcp', '/mcp'], async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Protocol-Version, Mcp-Session-Id');
-
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
@@ -6590,7 +6592,7 @@ async function startServer() {
   }
 
   const bindServer = (port: number) => {
-    const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(port, HOST, () => {
       activeServerPort = port;
       console.log(`[SVL-KERNEL] Server listening on http://0.0.0.0:${port}`);
       if (usesOllama()) {
@@ -6629,5 +6631,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
 

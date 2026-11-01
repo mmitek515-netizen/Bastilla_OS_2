@@ -5,7 +5,11 @@
 Use Node.js 24. Run `npm ci`, then `npm run dev` on port 3000.
 Configure model credentials through deployment secrets or a local `.env` based on
 `.env.example`. No model is included; unavailable providers must be reported honestly.
-Keep the Codespaces port private: the recovered backend still requires a full access-control audit.
+The API binds to `127.0.0.1` by default. Keep the Codespaces port private. Setting a
+non-loopback `BASTILLA_HOST` is rejected unless `GPT_ACTIONS_PUBLIC_URL` is configured;
+that public mode exposes only the GPT Actions setup/schema and the token-protected status
+and message routes. All other API, MCP, download, and UI routes are denied. This is not
+a public deployment mode for the full application.
 
 `npm run verify` runs four independent checks concurrently. GitHub Actions caches npm
 downloads and cancels obsolete runs on the same branch. Automatic Git synchronization
