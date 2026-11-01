@@ -11,6 +11,8 @@ if [[ ! -x node_modules/.bin/tsx ]]; then
   npm ci
 fi
 # keep-alive.sh uses flock to avoid duplicate servers after Codespaces restarts.
+# Codespaces port forwarding needs a network listener; keep port 3000 private.
+export HOST="${HOST:-0.0.0.0}"
 nohup bash scripts/keep-alive.sh >>"$LOG" 2>&1 </dev/null &
 echo "BastillaOS startup requested. Waiting for HTTP readiness on port 3000..."
 ready=0

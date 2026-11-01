@@ -163,6 +163,7 @@ while [ "$attempt" -lt 30 ]; do
   sleep 1
 done
 [ "$READY" -eq 1 ] || { cat "$WORK_DIR/server.log" >&2; echo "test-package: server did not become ready." >&2; exit 1; }
+grep -q "\[SVL-KERNEL\] Server listening on http://127.0.0.1:$PORT" "$WORK_DIR/server.log"
 node -e "
 (async () => {
   const baseUrl = 'http://127.0.0.1:$PORT';

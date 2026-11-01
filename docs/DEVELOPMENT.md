@@ -2,7 +2,9 @@
 
 ## First run
 
-Use Node.js 24. Run `npm ci`, then `npm run dev` on port 3000.
+Use Node.js 24. Run `npm ci`, then `npm run dev` on port 3000. The server binds to
+`127.0.0.1` by default. Set `HOST=0.0.0.0` only when remote access is required
+and protected by the deployment's access controls; keep Codespaces port 3000 private.
 Configure model credentials through deployment secrets or a local `.env` based on
 `.env.example`. No model is included; unavailable providers must be reported honestly.
 Keep the Codespaces port private: the recovered backend still requires a full access-control audit.
