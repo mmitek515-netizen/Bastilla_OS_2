@@ -3,8 +3,9 @@ import { RefreshCw, ShieldAlert } from 'lucide-react';
 import {
   AGENT_STATUS_LABELS,
   AGENT_STATUS_NAMES,
-  AGENT_STATUS_STALE_AFTER_MS,
+  getDisplayedAgentStatus,
   isAgentStatusResponse,
+  isAgentStatusFresh,
 } from '../lib/agentStatusContract.mjs';
 
 type AgentName = typeof AGENT_STATUS_NAMES[number];
@@ -97,9 +98,7 @@ export function BackgroundAgentsStatus() {
     };
   }, [credential, refresh]);
 
-  const expired = !data
-    || !Number.isFinite(Date.parse(data.observedAt))
-    || Date.now() - Date.parse(data.observedAt) > (data.staleAfterMs || AGENT_STATUS_STALE_AFTER_MS);
+  const fresh = isAgentStatusFresh(data);
 
   const connect = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -128,7 +127,7 @@ export function BackgroundAgentsStatus() {
         <h2 className="font-semibold text-cyan-100">Status agentów</h2>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400" role="status">
-            {!credential ? 'Wymagane uwierzytelnienie' : error || (expired ? 'Dane wygasły lub brak pomiaru' : `Pomiar: ${formatTime(data?.observedAt)}`)}
+            {!credential ? 'Wymagane uwierzytelnienie' : error || (!fresh ? 'Dane wygasły lub brak pomiaru' : `Pomiar: ${formatTime(data?.observedAt)}`)}
           </span>
           <button
             type="button"
@@ -168,9 +167,8 @@ export function BackgroundAgentsStatus() {
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {AGENT_STATUS_NAMES.map((name) => {
           const agent = data?.agents?.[name];
-          const expiredStatus = expired || !agent;
-          const status: AgentState = expiredStatus ? 'unverified' : agent.status;
-          const evidence = expiredStatus ? null : agent.evidence;
+          const status: AgentState = getDisplayedAgentStatus(agent, data);
+          const evidence = fresh ? agent?.evidence : null;
           return (
             <article key={name} className="min-w-0 rounded-lg border border-slate-700 bg-slate-900 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

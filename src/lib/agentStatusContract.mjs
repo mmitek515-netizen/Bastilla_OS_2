@@ -24,3 +24,19 @@ export function isAgentStatusResponse(result) {
             && typeof agent.evidence?.taskId === 'string'));
     }));
 }
+
+export function isAgentStatusFresh(snapshot, now = Date.now()) {
+  const observedAt = Date.parse(snapshot?.observedAt);
+  const age = now - observedAt;
+  const maxAge = Number.isFinite(snapshot?.staleAfterMs) && snapshot.staleAfterMs > 0
+    ? snapshot.staleAfterMs
+    : AGENT_STATUS_STALE_AFTER_MS;
+  return Number.isFinite(observedAt) && age >= 0 && age <= maxAge;
+}
+
+export function getDisplayedAgentStatus(agent, snapshot, now = Date.now()) {
+  if (!isAgentStatusFresh(snapshot, now) || !agent || !Object.hasOwn(AGENT_STATUS_LABELS, agent.status)) {
+    return 'unverified';
+  }
+  return agent.status;
+}

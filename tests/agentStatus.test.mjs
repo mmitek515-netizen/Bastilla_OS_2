@@ -7,6 +7,7 @@ import {
 import {
   AGENT_STATUS_NAMES,
   AGENT_STATUS_LABELS,
+  getDisplayedAgentStatus,
   isAgentStatusResponse,
 } from '../src/lib/agentStatusContract.mjs';
 
@@ -84,6 +85,15 @@ test('UI contract rejects malformed active states without timestamped evidence',
     ...response,
     agents: { ...agents, Aria: { ...agents.Aria, status: 'online' } },
   }), false);
+});
+
+test('UI downgrades missing, invalid, and expired snapshots to unverified', () => {
+  const active = { status: 'active' };
+  const freshSnapshot = { observedAt: '2026-11-01T12:00:00.000Z', staleAfterMs: 45_000 };
+  assert.equal(getDisplayedAgentStatus(active, freshSnapshot, Date.parse(freshSnapshot.observedAt)), 'active');
+  assert.equal(getDisplayedAgentStatus(active, freshSnapshot, Date.parse(freshSnapshot.observedAt) + 45_001), 'unverified');
+  assert.equal(getDisplayedAgentStatus(active, { ...freshSnapshot, observedAt: 'invalid' }, Date.now()), 'unverified');
+  assert.equal(getDisplayedAgentStatus(active, null), 'unverified');
 });
 
 test('old records and persisted running labels remain unverified', () => {
