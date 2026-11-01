@@ -5672,6 +5672,47 @@ app.post('/api/agents/inbox/read', (req, res) => {
   res.json({ success: true });
 });
 
+// Streaming of actual per-agent computations from the built-in deterministic engine.
+// Each event is emitted after its corresponding computation completes; no artificial token animation.
+app.post('/api/triad/message/without-nlp-stream', async (req, res) => {
+  const message = req.body?.message;
+  const target = req.body?.agent ?? 'triad';
+  if (typeof message !== 'string' || !message.trim() || message.length > MAX_CHAT_MESSAGE_LENGTH || (target !== 'triad' && !CHAT_AGENT_NAMES.includes(target))) {
+    return res.status(400).json({ success: false, error: 'Nieprawidłowa wiadomość lub agent.' });
+  }
+  if (Array.isArray(req.body?.attachments) && req.body.attachments.length) {
+    return res.status(400).json({ success: false, error: 'Załączniki wymagają standardowego endpointu czatu.' });
+  }
+  if (message.trim().startsWith('/')) {
+    return res.status(400).json({ success: false, error: 'Polecenia wykonawcze wymagają standardowego endpointu czatu.' });
+  }
+  res.status(200).setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.flushHeaders();
+  const emit = (event: Record<string, unknown>) => { if (!res.destroyed && !res.writableEnded) res.write(JSON.stringify(event) + '\n'); };
+  try {
+    const current = await getPythonKernelState(true);
+    const store = current?.store && typeof current.store === 'object' ? current.store : {};
+    const previousLength = Array.isArray(store.chat_history) ? store.chat_history.length : 0;
+    const agents: ChatAgentName[] = target === 'triad' ? [...CHAT_AGENT_NAMES] : [target];
+    const context = buildSystemContext(store, Array.isArray(store.update_history) ? store.update_history.length : 0);
+    const transcript: Array<{agent: string; tekst: string}> = [{ agent: 'Mateusz Mitek', tekst: message.trim() }];
+    for (const agent of agents) {
+      emit({ type: 'started', agent });
+      const reply = generateLocalReply(agent as any, message.trim(), context).reply;
+      transcript.push({ agent, tekst: reply });
+      emit({ type: 'agent_reply', agent, text: reply, engine: 'without_nlp' });
+    }
+    await runPythonKernel(['--action', 'batch_msg', '--msgs_json', JSON.stringify(transcript)]);
+    const state = await getPythonKernelState(true);
+    if (!hasPersistedAgentProtocolTranscript(state, transcript, previousLength)) throw new Error('Nie potwierdzono zapisu historii.');
+    emit({ type: 'done', success: true, state: { store: state.store }, reply: transcript.slice(1).map(x => x.tekst).join('\n\n') });
+  } catch (error) {
+    emit({ type: 'error', error: error instanceof Error ? error.message : 'Błąd silnika.' });
+  } finally { res.end(); }
+});
+
 app.post('/api/triad/message', async (req, res) => {
   const message: unknown = req.body?.message;
   const attachmentValidation = validateChatAttachments(req.body?.attachments ?? []);
