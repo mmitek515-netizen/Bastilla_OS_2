@@ -10,6 +10,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
 import { randomUUID, createHash } from 'crypto';
+import { createApiWriteGuard } from './src/lib/apiWriteGuard.mjs';
 import { INITIAL_DATA_STORE } from './src/kernel/svlKernel';
 import type { ChatSystemChange } from './src/kernel/chatChanges';
 import { withoutNlpEngine } from './src/lib/withoutNlpEngine';
@@ -152,7 +153,13 @@ const POLLINATIONS_API_KEY = rawEnvPollKey.startsWith('sk_')
 const app = express();
 const portArgIndex = process.argv.indexOf('--port');
 const DEFAULT_PORT = Number(portArgIndex >= 0 ? process.argv[portArgIndex + 1] : process.env.PORT || 3000);
-const PORT = Number.isFinite(DEFAULT_PORT) && DEFAULT_PORT > 0 ? DEFAULT_PORT : 3000;
+const PORT = Number.isInteger(DEFAULT_PORT) && DEFAULT_PORT > 0 && DEFAULT_PORT <= 65535 ? DEFAULT_PORT : 3000;
+const BASTILLA_HOST = (process.env.BASTILLA_HOST || '127.0.0.1').trim() || '127.0.0.1';
+const BASTILLA_API_TOKEN = (process.env.BASTILLA_API_TOKEN || '').trim();
+const internalApiHeaders = (contentType?: string): Record<string, string> => ({
+  ...(contentType ? { 'Content-Type': contentType } : {}),
+  ...(BASTILLA_API_TOKEN ? { Authorization: 'Be' + 'arer ' + BASTILLA_API_TOKEN } : {}),
+});
 let activeServerPort = PORT;
 const PYTHON_SCRIPT_PATH = path.resolve('svl_kernel.py');
 const KERNEL_STORE_PATH = path.resolve(process.env.SVL_KERNEL_STORE_PATH || '.svl_kernel_store.json');
@@ -164,6 +171,7 @@ const requestedUploadLimit = Number(process.env.BASTILLA_UPLOAD_MAX_MB || 32);
 const uploadLimitMB = Number.isFinite(requestedUploadLimit)
   ? Math.max(1, Math.min(256, Math.floor(requestedUploadLimit)))
   : 32;
+app.use(createApiWriteGuard({ host: BASTILLA_HOST, token: BASTILLA_API_TOKEN }));
 app.use(express.json({ limit: `${uploadLimitMB}mb` }));
 app.use(express.urlencoded({ limit: `${uploadLimitMB}mb`, extended: true }));
 
@@ -2200,7 +2208,7 @@ Dostępne polecenia:
         } else {
           const createRes = await fetch(`http://127.0.0.1:${activeServerPort}/api/apps/create`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: internalApiHeaders('application/json'),
             body: JSON.stringify({
               id: cleanId,
               name: cleanId.replace(/-/g, ' ').toUpperCase(),
@@ -2225,7 +2233,7 @@ Wpisz 'run ${cleanId}' aby uruchomić podgląd lub 'export ${cleanId}' aby wysł
       } else {
         const createRes = await fetch(`http://127.0.0.1:${activeServerPort}/api/databases/create`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: internalApiHeaders('application/json'),
           body: JSON.stringify({ id: target }),
         });
         const createData = await createRes.json() as {
@@ -2311,7 +2319,10 @@ Karta 'Podgląd na żywo' w Studio Aplikacji wyświetla obecnie interfejs tej ap
         output = 'Użycie: export <nazwa-aplikacji>';
       } else {
         const cleanId = target.toLowerCase();
-        const exportRes = await fetch(`http://localhost:${PORT}/api/apps/${cleanId}/export`, { method: 'POST' });
+        const exportRes = await fetch(`http://localhost:${PORT}/api/apps/${cleanId}/export`, {
+          method: 'POST',
+          headers: internalApiHeaders(),
+        });
         const exportData = await exportRes.json();
         if (exportData.success) {
           output = `[EKSPORT APLIKACJI] Sukces!
@@ -4254,7 +4265,7 @@ Uptime:                 ${Math.round(process.uptime())} sekund
         const appType = (cmd === 'create-app' ? args[1] : args[2]) || 'html5-web';
         const execRes = await fetch(`http://localhost:${PORT}/api/apps/execute`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: internalApiHeaders('application/json'),
           body: JSON.stringify({ command: `create-app ${appName} ${appType}` })
         });
         const d = await execRes.json();
@@ -4262,7 +4273,7 @@ Uptime:                 ${Math.round(process.uptime())} sekund
       } else {
         const execRes = await fetch(`http://localhost:${PORT}/api/apps/execute`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: internalApiHeaders('application/json'),
           body: JSON.stringify({ command: args.join(' ') || 'list' })
         });
         const d = await execRes.json();
@@ -4942,7 +4953,7 @@ async function tryExecuteChatCommand(message: string): Promise<ChatExecResult | 
     try {
       const kernelRes = await fetch(`http://127.0.0.1:${activeServerPort}/api/kernel/command`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalApiHeaders('application/json'),
         body: JSON.stringify({ command: trimmed }),
         signal: AbortSignal.timeout(15000),
       });
@@ -5363,7 +5374,7 @@ app.post('/api/hyperos/console', async (req, res) => {
     try {
       const kernelRes = await fetch(`http://127.0.0.1:${activeServerPort}/api/kernel/command`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalApiHeaders('application/json'),
         body: JSON.stringify({ command: clean }),
         signal: AbortSignal.timeout(15000),
       });
@@ -6054,7 +6065,7 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
       const command = String(args.command || args.prompt || args.message || 'napraw wszystko');
       const fetchRes = await fetch(`http://127.0.0.1:${activeServerPort || 3000}/api/astyria/mission`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalApiHeaders('application/json'),
         body: JSON.stringify({ action: 'process_command', command, userMessage: command }),
       });
       const data = await fetchRes.json() as any;
@@ -6067,7 +6078,7 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
       const action = String(args.action || 'repair_all');
       const fetchRes = await fetch(`http://127.0.0.1:${activeServerPort || 3000}/api/astyria/mission`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: internalApiHeaders('application/json'),
         body: JSON.stringify({ action, command: args.message }),
       });
       const data = await fetchRes.json() as any;
@@ -6095,10 +6106,10 @@ async function handleMcpToolCall(name: string, args: Record<string, any> = {}) {
     case 'chat_triad': {
       const message = String(args.message || '');
       const agent = String(args.agent || 'Astyria');
-      const fetchRes = await fetch(`http://127.0.0.1:${activeServerPort || 3000}/api/chat`, {
+      const fetchRes = await fetch(`http://127.0.0.1:${activeServerPort || 3000}/api/triad/message`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, target: agent }),
+        headers: internalApiHeaders('application/json'),
+        body: JSON.stringify({ message, agent }),
       });
       const data = await fetchRes.json() as any;
       return {
@@ -6159,11 +6170,13 @@ app.get('/api/mcp/openapi.json', (req, res) => {
       version: '1.0.0',
     },
     servers: [{ url: origin }],
+    components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } },
     paths: {
       '/api/astyria/mission': {
         post: {
           summary: 'Wykonaj polecenie lub misję naprawczą przez Astyrię',
           operationId: 'executeAstyriaMission',
+          security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
             content: {
@@ -6173,7 +6186,12 @@ app.get('/api/mcp/openapi.json', (req, res) => {
                   properties: {
                     action: {
                       type: 'string',
-                      enum: ['process_command', 'repair_all', 'repair_ollama_and_llm', 'deep_scan', 'vm_snapshot_now'],
+                      enum: [
+                        'deploy_vm_ten_system', 'vm_snapshot_now', 'vm_memory_optimize', 'vm_firewall_audit',
+                        'sync_version', 'sync_versions', 'repair_all_from_logs', 'full_system_app_chat_repair',
+                        'repair_all', 'repair_ollama_and_llm', 'process_command', 'unblock', 'flush_buffers',
+                        'repair_schemas', 'repair', 'deep_scan', 'internet_self_update', 'ollama_optimize',
+                      ],
                       default: 'process_command',
                     },
                     command: { type: 'string', description: 'Treść polecenia dla Astyrii' },
@@ -6590,9 +6608,9 @@ async function startServer() {
   }
 
   const bindServer = (port: number) => {
-    const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(port, BASTILLA_HOST, () => {
       activeServerPort = port;
-      console.log(`[SVL-KERNEL] Server listening on http://0.0.0.0:${port}`);
+      console.log(`[SVL-KERNEL] Server listening on http://${BASTILLA_HOST}:${port}`);
       if (usesOllama()) {
         // Rozgrzewka w tle: wagi modelu trafiają do pamięci, zanim padnie pierwsza wiadomość.
         void warmupOllama(LLM_CHAIN_CONFIG, AbortSignal.timeout(180000)).then((warm) => {
@@ -6605,21 +6623,12 @@ async function startServer() {
 
     server.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
-        const nextPort = port + 1;
-        const maxPort = PORT + 20;
-        if (nextPort <= maxPort) {
-          console.warn(`[SVL-KERNEL] Port ${port} is busy; retrying on ${nextPort}.`);
-          console.error('[SVL-KERNEL] Port fallback disabled to keep Codespaces forwarding stable.');
-          process.exitCode = 1;
-          return;
-        }
-        console.error(`[SVL-KERNEL] Ports ${PORT}-${maxPort} are unavailable. Aborting startup.`);
-        process.exitCode = 1;
-        return;
+        console.error(`[SVL-KERNEL] Port ${port} is unavailable; aborting startup.`);
+        process.exit(1);
       }
 
       console.error('[SVL-KERNEL] Failed to start server:', error);
-      process.exitCode = 1;
+      process.exit(1);
     });
   };
 
@@ -6628,6 +6637,5 @@ async function startServer() {
 
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
+  process.exit(1);
 });
-
-
