@@ -11,6 +11,16 @@ that public mode exposes only the GPT Actions setup/schema and the token-protect
 and message routes. All other API, MCP, download, and UI routes are denied. This is not
 a public deployment mode for the full application.
 
+| Mode / route | Access |
+| --- | --- |
+| Default loopback application API and MCP | No user authentication; local development only. Keep forwarded ports private. |
+| Public Actions `GET /api/gpt-actions/setup` and `GET /api/gpt-actions/openapi.json` | Public configuration/schema only; do not include secrets in these responses. |
+| Public Actions `GET /api/gpt-actions/status` and `POST /api/gpt-actions/message` | Requires a valid `GPT_ACTIONS_TOKEN` (minimum 32 characters). |
+| Any other path/method in public Actions mode | HTTP 403 before application route handling, including shell execution, kernel state, writes, legacy MCP, downloads, and the UI. |
+
+The legacy Express MCP endpoints no longer grant wildcard browser CORS. This is not
+a substitute for authentication: use them only on loopback/private deployments.
+
 `npm run verify` runs four independent checks concurrently. GitHub Actions caches npm
 downloads and cancels obsolete runs on the same branch. Automatic Git synchronization
 uses the same command before committing. It cannot resolve competing agent edits;
