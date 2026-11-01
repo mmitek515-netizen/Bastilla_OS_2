@@ -8,23 +8,25 @@ import {resolveBuildInfo} from './scripts/build-info.mjs';
 
 export default defineConfig(() => {
   const packageJson = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
-  let commitSha = process.env.GITHUB_SHA ?? '';
+  let commitSha = '';
   let dirty = false;
   try {
-    if (!commitSha) {
-      commitSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-        cwd: import.meta.dirname,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-    }
+    commitSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: import.meta.dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    commitSha = process.env.GITHUB_SHA ?? '';
+  }
+  try {
     dirty = Boolean(execFileSync('git', ['status', '--porcelain'], {
       cwd: import.meta.dirname,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim());
   } catch {
-    commitSha = '';
+    dirty = false;
   }
   const buildInfo = resolveBuildInfo(packageJson.version, commitSha, dirty);
 
@@ -50,4 +52,3 @@ export default defineConfig(() => {
     },
   };
 });
-
