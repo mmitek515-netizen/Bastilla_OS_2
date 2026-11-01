@@ -33,6 +33,7 @@ interface AgentCommsViewProps {
   isLoading: boolean;
   sendError?: string | null;
   streamedReply?: string;
+  streamProgress?: { completed: number; total: number; label: string } | null;
   onStopGeneration?: () => void;
   onClearHistory: () => void;
   onForceSync?: () => void;
@@ -49,6 +50,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   isLoading,
   sendError,
   streamedReply,
+  streamProgress,
   onStopGeneration,
   onClearHistory,
   onForceSync,
@@ -534,6 +536,13 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
             )}
           </details>
 
+          {isLoading && streamProgress && streamProgress.total > 0 && (
+            <section aria-label="Postęp obliczeń agentów" className="rounded-xl border border-cyan-800/50 bg-slate-900 p-3" aria-live="polite">
+              <div className="mb-2 flex justify-between gap-2 text-xs text-cyan-200"><span>{streamProgress.label}</span><span>{streamProgress.completed} / {streamProgress.total}</span></div>
+              <progress className="h-2 w-full accent-cyan-400" value={streamProgress.completed} max={streamProgress.total} />
+              <p className="mt-1 text-[10px] text-slate-400">Postęp na podstawie zakończonych obliczeń agentów — nie postęp pobierania pliku.</p>
+            </section>
+          )}
           {isLoading && streamedReply && (
             <article aria-label="Odpowiedź generowana na żywo" className="rounded-2xl border border-cyan-800/50 bg-slate-900/75 p-4">
               <div className="mb-2 flex items-center justify-between gap-2 text-xs text-cyan-300">
