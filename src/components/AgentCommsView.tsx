@@ -32,6 +32,8 @@ interface AgentCommsViewProps {
   onRunAstyriaMission: (action: AstyriaMissionAction) => Promise<void>;
   isLoading: boolean;
   sendError?: string | null;
+  streamedReply?: string;
+  onStopGeneration?: () => void;
   onClearHistory: () => void;
   onForceSync?: () => void;
   onTriggerInitiative?: () => Promise<void>;
@@ -46,6 +48,8 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   onRunAstyriaMission,
   isLoading,
   sendError,
+  streamedReply,
+  onStopGeneration,
   onClearHistory,
   onForceSync,
   onTriggerInitiative,
@@ -467,6 +471,17 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               </ol>
             )}
           </details>
+
+          {isLoading && streamedReply && (
+            <article aria-label="Odpowiedź generowana na żywo" className="rounded-2xl border border-cyan-800/50 bg-slate-900/75 p-4">
+              <div className="mb-2 flex items-center justify-between gap-2 text-xs text-cyan-300">
+                <span>Odpowiedź strumieniowa · {selectedTarget === 'triad' ? 'Agenci' : selectedTarget === 'si_1' ? 'Aria' : selectedTarget}</span>
+                {onStopGeneration && <button type="button" onClick={onStopGeneration} className="rounded-lg border border-slate-600 px-2 py-1 text-slate-200 hover:bg-slate-800">Zatrzymaj</button>}
+              </div>
+              <FormattedMessage content={streamedReply} className="text-sm leading-7 text-slate-100" />
+              <span aria-hidden="true" className="ml-1 inline-block h-4 w-1.5 animate-pulse bg-cyan-400" />
+            </article>
+          )}
 
           {isLoading && (
             <section aria-label="Aktywność asystenta" aria-live="polite" className="rounded-2xl border border-slate-700 bg-slate-900/80 p-3 sm:p-4 text-slate-200">
