@@ -201,7 +201,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
               onClick={() => onSelectTab(tab.id)}
-              className={`group relative min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-center transition-all duration-200 lg:min-h-11 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-left ${tab.id === 'terminal' ? 'flex' : 'hidden lg:flex'} ${
+              className={`group relative min-w-0 flex-1 flex-col items-center justify-center gap-1 min-h-11 rounded-xl px-1 py-2 text-center transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-left ${tab.id === 'terminal' ? 'flex' : 'hidden lg:flex'} ${
                 isActive
                   ? 'border border-cyan-300/15 bg-cyan-950/50 text-cyan-100 shadow-[inset_2px_0_0_#67e8f9,0_4px_18px_rgba(8,145,178,0.08)]'
                   : 'border border-transparent text-slate-400 hover:bg-blue-950/50 hover:text-blue-100'
@@ -216,13 +216,13 @@ export const Navigation: React.FC<NavigationProps> = ({
             </button>
           );
         })}
-        <div className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 lg:mt-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 ${isSecondaryActive ? 'bg-cyan-950/50 text-cyan-100' : 'bg-slate-900 text-cyan-200'}`}>
+        <div className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 min-h-11 rounded-xl px-1 py-2 lg:mt-2 lg:w-full lg:flex-none lg:flex-row lg:justify-start lg:gap-3 lg:px-3 ${isSecondaryActive ? 'bg-cyan-950/50 text-cyan-100' : 'bg-slate-900 text-cyan-200'}`}>
           <Plug className="h-4 w-4 shrink-0" aria-hidden="true" />
           <label htmlFor="bastilla-more-modules" className="w-full truncate text-center text-[10px] lg:text-left lg:text-[11px]">Więcej</label>
           <select
             id="bastilla-more-modules"
             aria-label="Więcej — wybierz moduł BastillaOS"
-            className="absolute inset-0 h-full w-full cursor-pointer rounded-xl opacity-0 focus-visible:opacity-100 focus-visible:bg-slate-950 focus-visible:text-white"
+            className="absolute inset-0 h-full w-full cursor-pointer rounded-xl opacity-0 focus-visible:opacity-100 focus-visible:bg-slate-950 focus-visible:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
             value={isSecondaryActive ? activeTab : ''}
             onChange={(event) => { if (event.target.value) onSelectTab(event.target.value as TabId); }}
           >
