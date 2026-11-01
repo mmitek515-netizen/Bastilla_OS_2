@@ -434,22 +434,11 @@ app.post('/api/explorer/export', (req, res) => {
 });
 
 // --- GITHUB EXPORT & BIDIRECTIONAL SYNC ENGINE BY ASTYRIA ---
-const GITHUB_CRED_PATH = path.resolve('.github_credentials.json');
-
-function loadGitHubCredentials(): { username?: string; repoName?: string; token?: string } {
-  try {
-    if (fs.existsSync(GITHUB_CRED_PATH)) {
-      return JSON.parse(fs.readFileSync(GITHUB_CRED_PATH, 'utf-8'));
-    }
-  } catch {}
-  return { username: 'u6930438163-code', repoName: 'AI_Studio_BastillaOS' };
-}
-
-function saveGitHubCredentials(username: string, repoName: string, token: string) {
-  try {
-    fs.writeFileSync(GITHUB_CRED_PATH, JSON.stringify({ username, repoName, token }, null, 2), 'utf-8');
-  } catch {}
-}
+// GitHub authentication is managed outside the app (GitHub App / git credential helper).
+// Never persist or accept a shared personal access token from API requests.
+const GITHUB_REPO_OWNER = 'mmitek515-netizen';
+const GITHUB_REPO_NAME = 'Bastilla_OS_2';
+const GITHUB_REMOTE_URL = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}.git`;
 
 function getSyncedModulesList(): string[] {
   const mods: string[] = [];
@@ -467,31 +456,22 @@ function getSyncedModulesList(): string[] {
 }
 
 app.get('/api/github/status', (_req, res) => {
-  const creds = loadGitHubCredentials();
   return res.json({
-    username: creds.username || 'u6930438163-code',
-    repoName: creds.repoName || 'AI_Studio_BastillaOS',
-    hasToken: Boolean(creds.token),
-    maskedToken: creds.token ? `${creds.token.slice(0, 6)}...` : '',
+    username: GITHUB_REPO_OWNER,
+    repoName: GITHUB_REPO_NAME,
+    hasToken: false,
+    maskedToken: '',
+    authMode: 'external-git-credentials',
     syncedModules: getSyncedModulesList()
   });
 });
 
 app.post('/api/github/export', async (req, res) => {
-  const saved = loadGitHubCredentials();
-  const username = (req.body.username || saved.username || '').trim();
-  const repoName = (req.body.repoName || saved.repoName || '').trim();
-  const token = (req.body.token || saved.token || '').trim();
-  const commitMessage = req.body.commitMessage || 'Export from SVL Kernel v8.5.1-Desktop-Ready (Mission for Astyria)';
-
-  if (!username || !repoName || !token) {
-    return res.status(400).json({ error: 'Brak wymaganych danych: username, repoName lub token PAT.' });
-  }
-
-  saveGitHubCredentials(username, repoName, token);
-
-  const safeRepo = repoName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
-  const remoteUrl = `https://${username}:${token}@github.com/${username}/${safeRepo}.git`;
+  if (req.body?.token) return res.status(400).json({ error: 'Token PAT nie jest obsługiwany. Skonfiguruj uwierzytelnianie GitHub App lub git credential helper w środowisku serwera.' });
+  const username = GITHUB_REPO_OWNER;
+  const safeRepo = GITHUB_REPO_NAME;
+  const remoteUrl = GITHUB_REMOTE_URL;
+  const commitMessage = req.body?.commitMessage || 'Export from Bastilla OS 2';
 
   try {
     const run = async (args: string[]) => {
@@ -537,19 +517,10 @@ app.post('/api/github/export', async (req, res) => {
 });
 
 app.post('/api/github/pull', async (req, res) => {
-  const saved = loadGitHubCredentials();
-  const username = (req.body.username || saved.username || 'u6930438163-code').trim();
-  const repoName = (req.body.repoName || saved.repoName || 'AI_Studio_BastillaOS').trim();
-  const token = (req.body.token || saved.token || '').trim();
-
-  if (token) {
-    saveGitHubCredentials(username, repoName, token);
-  }
-
-  const safeRepo = repoName.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
-  const remoteUrl = token
-    ? `https://${username}:${token}@github.com/${username}/${safeRepo}.git`
-    : `https://github.com/${username}/${safeRepo}.git`;
+  if (req.body?.token) return res.status(400).json({ error: 'Token PAT nie jest obsługiwany. Użyj zewnętrznego uwierzytelniania git.' });
+  const username = GITHUB_REPO_OWNER;
+  const safeRepo = GITHUB_REPO_NAME;
+  const remoteUrl = GITHUB_REMOTE_URL;
 
   try {
     const run = async (args: string[]) => {
