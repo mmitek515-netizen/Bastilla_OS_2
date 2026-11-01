@@ -37,3 +37,9 @@ Sources were recovered from `u6930438163-code/AI_Studio_BastillaOS` commit
 `2203ac94b1dbbad0f9e2a470c00a4b24bc9900ed`. Runtime databases, exports,
 virtual environments, archived ZIPs and automatic deployment workflows were excluded.
 Local Codespace edits have not been compared: this import does not claim to contain them.
+
+## CI and agent execution status
+
+- `.github/workflows/ci.yml` runs on `pull_request` and pushes to `main`: `test`, `lint`, `build` and `build:server` run as independent matrix jobs (npm cache, `npm ci`), stale runs are cancelled, and the final `verify` job gates on all of them. The local equivalent is `npm run verify`.
+- Agent profiles in `.github/agents/` are role descriptions, not running workers. An executor counts as active only when a Copilot coding agent session produces a real commit and PR on an `agent/<name>/<task>` branch with green CI.
+- Pilot: assign one small task (e.g. Alex, issue #10) first; start the four parallel role tracks (#10/#17, #11, #12, #13) only after the pilot PR passes CI. Record UTC timestamp, commit SHA, PR link, CI result and blockers in the issue.

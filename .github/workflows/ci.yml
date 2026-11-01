@@ -9,9 +9,14 @@ concurrency:
   group: bastilla-checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  verify:
+  checks:
+    name: ${{ matrix.check }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [test, lint, build, build:server]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,4 +24,12 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm run verify
+      - run: npm run ${{ matrix.check }}
+  verify:
+    name: verify
+    needs: checks
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: test "${{ needs.checks.result }}" = "success"
