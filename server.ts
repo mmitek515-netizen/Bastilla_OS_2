@@ -3193,7 +3193,7 @@ const TRIADA_COMMIT_AUTHORS: Record<string, { name: string; email: string }> = {
   Alex: { name: 'Alex (SVL Agent)', email: 'alex@svl.system' },
   Astyria: { name: 'Astyria (SVL Agent)', email: 'astyria@svl.system' },
   Aurelius: { name: 'Aurelius (SVL Agent)', email: 'aurelius@svl.system' },
-  si_1: { name: 'Aria', email: 'aria@svl.system' },
+  Aria: { name: 'Aria', email: 'aria@svl.system' },
   triad: { name: 'Triada (SVL Agents)', email: 'triada@svl.system' },
 };
 
@@ -3678,7 +3678,7 @@ const OLLAMA_MISSION_ROLES: Record<ChatAgentName, string> = {
   Alex: 'infrastruktura: usługa Ollamy, zasoby serwera, dostępność modelu',
   Astyria: 'wydajność: wybór modelu, prędkość generowania, parametry kontekstu',
   Aurelius: 'stabilność i bezpieczeństwo: miejsce na dysku, ekspozycja API, odporność na awarie',
-  si_1: 'synchronizacja: spójność konfiguracji Ollamy ze stanem aplikacji i DATA_STORE',
+  Aria: 'synchronizacja: spójność konfiguracji Ollamy ze stanem aplikacji i DATA_STORE',
 };
 
 function stripAgentCommandLines(text: string): string {
@@ -4568,7 +4568,7 @@ const CHAT_AGENT_MISSIONS: Record<ChatAgentName, string> = {
     'Misja: analizuj wpływ proponowanych ulepszeń, wskazuj testy, ryzyka i sposoby synchronizacji zapisanych zmian.',
     'W Studio Aplikacji można użyć create-app <nazwa> [typ], create-db <nazwa>, list i list-db. Nie deklaruj wykonania operacji bez potwierdzenia serwera.',
   ].join(' '),
-  si_1: [
+  Aria: [
     'Jesteś Aria, agentką AI Triady w BastillaOS, powołaną przez Operatora. Przedstawiasz się zawsze jako Aria.',
     'Misja: synchronizacja zmian w aplikacji — pilnuj, aby zatwierdzone operacje były realnie widoczne w interfejsie, i raportuj rozbieżności między deklaracjami a stanem DATA_STORE.',
     'W Studio Aplikacji można użyć create-app <nazwa> [typ], create-db <nazwa>, list i list-db. Nie deklaruj wykonania operacji bez potwierdzenia serwera.',
@@ -5584,7 +5584,7 @@ function buildWithoutNlpAgentReply(
     );
   } else {
     lines.push(
-      agent === 'si_1'
+      agent === 'Aria'
         ? `Synchronizacja sygnału: rekonstrukcja ${reconstruction}, współczynników: ${analysis.encodedCoefficients.length}.`
         : `Audyt integralności: rekonstrukcja ${reconstruction}, współczynników: ${analysis.encodedCoefficients.length}.`,
       `Energia sygnału zachowana (Parseval): ${analysis.spectralEnergy}.`,
@@ -5905,7 +5905,7 @@ app.post('/api/triad/message', async (req, res) => {
         }
       }
       const localCtx = buildSystemContext(store, Array.isArray(store.update_history) ? store.update_history.length : 0);
-      const localAgentName = agent === 'si_1' ? 'si_1' : agent;
+      const localAgentName = agent;
       const localReply = generateLocalReply(localAgentName as any, cleanMessage, localCtx).reply;
       const offlinePrefix = llmProviders.length > 0 ? '[Lokalna rozmowa · API niedostępne] ' : '';
       return {
@@ -6038,7 +6038,7 @@ const MCP_TOOLS: McpToolDefinition[] = [
         },
         agent: {
           type: 'string',
-          enum: ['triad', 'Alex', 'Astyria', 'Aurelius', 'si_1'],
+          enum: ['triad', 'Alex', 'Astyria', 'Aurelius', 'Aria'],
           default: 'Astyria',
           description: 'Adresat w Triadzie (lub triad dla wszystkich).',
         },
@@ -6138,7 +6138,7 @@ app.get('/api/mcp/sse', (req, res) => {
 registerGptActions(app, {
   providers: () => configuredProviders(LLM_CHAIN_CONFIG),
   chat: async (agent: string, message: string, signal: AbortSignal) => {
-    const key = (agent === 'Aria' ? 'si_1' : agent) as ChatAgentName;
+    const key = (agent === 'si_1' ? 'Aria' : agent) as ChatAgentName;
     return generateWithChain(LLM_CHAIN_CONFIG, {
       system: `${CHAT_AGENT_MISSIONS[key]} Odpowiadasz przez GPT Actions jako konsultant. Ten kanał nie ma narzędzi do wykonywania poleceń ani zapisu plików. Podawaj analizy i propozycje kodu; nie deklaruj wykonania zmian. Korzystaj wyłącznie z kontekstu przekazanego w wiadomości.`,
       history: [],
@@ -6387,7 +6387,7 @@ app.post('/api/agent-tasks/run', async (req, res) => {
       payload: { targetAppId: targetAppId || 'bastilla_os_2' },
       ...(requestedAction === 'ai_task' ? {
         aiExecutor: async (task, signal) => {
-          const chatAgent: ChatAgentName = task.agent === 'Aria' ? 'si_1'
+          const chatAgent: ChatAgentName = task.agent === 'Aria' ? 'Aria'
             : task.agent === 'Operator' ? 'Alex' : task.agent;
           const result = await generateWithChain(LLM_CHAIN_CONFIG, {
             system: `${CHAT_AGENT_MISSIONS[chatAgent]} Odpowiadasz na jawne zadanie przekazane przez operatora. Nie masz narzędzi do wykonywania poleceń ani zapisu plików. Przygotuj konkretną analizę lub rezultat, ale nie deklaruj zmian ani działań, których serwer nie wykonał.`,
