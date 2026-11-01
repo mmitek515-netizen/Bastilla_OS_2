@@ -7,6 +7,10 @@ Configure model credentials through deployment secrets or a local `.env` based o
 `.env.example`. No model is included; unavailable providers must be reported honestly.
 Keep the Codespaces port private: the recovered backend still requires a full access-control audit.
 
+## GitHub evidence dashboard
+
+The read-only `GET /api/github/agents/evidence` route requires both `BASTILLA_GITHUB_DASHBOARD_TOKEN` (32+ characters) and a least-privilege `BASTILLA_GITHUB_READ_TOKEN` with read access to Issues, Pull requests and Actions. Configure `BASTILLA_GITHUB_REPOSITORY` as `owner/repo` when using a different repository. The dashboard prompts for the dashboard token and keeps it only in tab memory; the GitHub token stays server-side. Do not expose the app publicly until HTTPS and the broader API access-control audit are complete.
+
 `npm run verify` runs four independent checks concurrently. GitHub Actions caches npm
 downloads and cancels obsolete runs on the same branch. Automatic Git synchronization
 uses the same command before committing. It cannot resolve competing agent edits;

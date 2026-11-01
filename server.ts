@@ -55,6 +55,7 @@ import {
 } from './src/kernel/chatAttachments';
 import { cleanAgentReplyText, extractAgentCommands } from './src/kernel/agentCommands';
 import { agentTaskRegistry } from './src/kernel/agentTasks';
+import { fetchGitHubEvidence, isAuthorizedGitHubDashboardToken } from './src/lib/githubEvidence.mjs';
 import {
   formatBestFitReport,
   selectBestFit,
@@ -120,7 +121,7 @@ const LLM_CHAIN_CONFIG: LlmChainConfig = {
   ollamaNumPredict: Number(process.env.OLLAMA_NUM_PREDICT) || 0,
   ollamaNumThread: Number(process.env.OLLAMA_NUM_THREAD) || 0,
   // Zawsze dołączamy gemini, gdy klucz GEMINI_API_KEY jest dostępny w AI Studio
-  providers: (process.env.LLM_PROVIDERS || (realKey(GEMINI_API_KEY) ? 'gemini,ollama,xai' : 'ollama'))
+  providers: (process.env.LLM_PROVIDERS || (realKey(GEMINI_API_KEY) ? 'gemini,xai' : ''))
     .split(',')
     .map((name) => name.trim().toLowerCase())
     .filter((name): name is 'gemini' | 'xai' | 'ollama' => name === 'gemini' || name === 'xai' || name === 'ollama'),
@@ -297,17 +298,19 @@ type BackgroundAgent = typeof backgroundAgents[number];
 type BackgroundAgentState = {
   enabled: boolean;
   lastCheck: string | null;
-  status: 'waiting' | 'online' | 'offline' | 'no-models';
+  status: 'unverified';
   error: string | null;
 };
 const agentBackgroundState: Record<BackgroundAgent, BackgroundAgentState> =
   Object.fromEntries(backgroundAgents.map(name => [name, {
-    enabled: true, lastCheck: null, status: 'waiting', error: null,
+    enabled: true, lastCheck: null, status: 'unverified', error: null,
   }])) as Record<BackgroundAgent, BackgroundAgentState>;
 let backgroundAgentCheckRunning = false;
 let backgroundModelCount = 0;
 let backgroundModelNames: string[] = [];
 let backgroundLastDurationMs: number | null = null;
+let backgroundOllamaConnected = false;
+let backgroundOllamaLastCheck: string | null = null;
 async function checkBackgroundAgents() {
   if (backgroundAgentCheckRunning) return;
   backgroundAgentCheckRunning = true;
@@ -321,27 +324,14 @@ async function checkBackgroundAgents() {
       ? result.models.map(model => model.name).filter((name): name is string => typeof name === 'string')
       : [];
     backgroundModelCount = backgroundModelNames.length;
-    const now = new Date().toISOString();
-    for (const agent of backgroundAgents) {
-      if (!agentBackgroundState[agent].enabled) continue;
-      agentBackgroundState[agent] = {
-        enabled: true, lastCheck: now,
-        status: backgroundModelCount ? 'online' : 'no-models', error: null,
-      };
-    }
-  } catch (error) {
+    backgroundOllamaConnected = true;
+  } catch {
     backgroundModelCount = 0;
     backgroundModelNames = [];
-    const now = new Date().toISOString();
-    for (const agent of backgroundAgents) {
-      if (!agentBackgroundState[agent].enabled) continue;
-      agentBackgroundState[agent] = {
-        enabled: true, lastCheck: now, status: 'offline',
-        error: error instanceof Error ? error.message : 'Brak połączenia',
-      };
-    }
+    backgroundOllamaConnected = false;
   } finally {
     backgroundLastDurationMs = Date.now() - started;
+    backgroundOllamaLastCheck = new Date().toISOString();
     backgroundAgentCheckRunning = false;
   }
 }
@@ -352,8 +342,14 @@ app.get('/api/agents/background/status', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({
     monitoring: true, intervalMs: 15000, agents: agentBackgroundState,
-    ollama: { modelCount: backgroundModelCount, models: backgroundModelNames, checkDurationMs: backgroundLastDurationMs },
-    note: 'Wspólny stan Ollama i liczba modeli; nie oznacza uruchomionej inferencji żadnego agenta.',
+    ollama: {
+      connected: backgroundOllamaConnected,
+      modelCount: backgroundModelCount,
+      models: backgroundModelNames,
+      checkedAt: backgroundOllamaLastCheck,
+      checkDurationMs: backgroundLastDurationMs,
+    },
+    note: 'Status procesu agentów jest niezweryfikowany; monitoring Ollama nie potwierdza działania agenta ani inferencji.',
   });
 });
 
@@ -435,6 +431,10 @@ app.post('/api/explorer/export', (req, res) => {
 
 // --- GITHUB EXPORT & BIDIRECTIONAL SYNC ENGINE BY ASTYRIA ---
 const GITHUB_CRED_PATH = path.resolve('.github_credentials.json');
+const githubDashboardToken = (process.env.BASTILLA_GITHUB_DASHBOARD_TOKEN || '').trim();
+const githubReadToken = (process.env.BASTILLA_GITHUB_READ_TOKEN || '').trim();
+const githubRepository = (process.env.BASTILLA_GITHUB_REPOSITORY || 'mmitek515-netizen/Bastilla_OS_2').trim();
+let activeGitHubEvidenceRequests = 0;
 
 function loadGitHubCredentials(): { username?: string; repoName?: string; token?: string } {
   try {
@@ -472,9 +472,37 @@ app.get('/api/github/status', (_req, res) => {
     username: creds.username || 'u6930438163-code',
     repoName: creds.repoName || 'AI_Studio_BastillaOS',
     hasToken: Boolean(creds.token),
-    maskedToken: creds.token ? `${creds.token.slice(0, 6)}...` : '',
     syncedModules: getSyncedModulesList()
   });
+});
+
+app.get('/api/github/agents/evidence', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Vary', 'Authorization');
+  if (githubDashboardToken.length < 32) {
+    return res.status(503).json({ error: 'GitHub dashboard access is not configured.' });
+  }
+  if (!isAuthorizedGitHubDashboardToken(githubDashboardToken, req.get('authorization') || '')) {
+    res.setHeader('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({ error: 'Invalid dashboard access token.' });
+  }
+  if (githubReadToken.length < 20) {
+    return res.status(503).json({ error: 'GitHub read access is not configured.' });
+  }
+  if (activeGitHubEvidenceRequests >= 2) {
+    return res.status(429).json({ error: 'GitHub evidence is already being refreshed.' });
+  }
+
+  activeGitHubEvidenceRequests++;
+  try {
+    const evidence = await fetchGitHubEvidence({ token: githubReadToken, repository: githubRepository });
+    return res.json(evidence);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'GitHub evidence could not be loaded.';
+    return res.status(502).json({ error: message });
+  } finally {
+    activeGitHubEvidenceRequests--;
+  }
 });
 
 app.post('/api/github/export', async (req, res) => {
@@ -6629,5 +6657,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
-

@@ -30,6 +30,7 @@ import { FileExplorer } from './components/FileExplorer';
 import { AppsStudioView } from './components/AppsStudioView';
 import { WithoutNlpView } from './components/WithoutNlpView';
 import { GitHubExportView } from './components/GitHubExportView';
+import { GitHubEvidencePanel } from './components/GitHubEvidencePanel';
 import { CloudLibraryView } from './components/CloudLibraryView';
 import { IntegrationsView } from './components/IntegrationsView';
 import { BastillaDashboard } from './components/BastillaDashboard';
@@ -645,15 +646,7 @@ export default function App() {
           {activeTab === 'integrations' && <IntegrationsView onOpenLibrary={() => setActiveTab('cloud_library')} />}
 
           {activeTab === 'cloud_library' && <CloudLibraryView />}
-          {activeTab === 'project_progress' && (
-            <section className="flex min-h-[75dvh] flex-1 flex-col bg-slate-950">
-              <header className="flex items-center justify-between gap-2 border-b border-slate-800 px-4 py-3">
-                <h1 className="text-sm font-semibold text-cyan-100">Bastilla OS 2 — postęp i aktualności</h1>
-                <a href="/dashboard/bastilla-os-2-progress.html" target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-300">Pełny ekran</a>
-              </header>
-              <iframe src="/dashboard/bastilla-os-2-progress.html" title="Postęp Bastilla OS 2 z GitHuba" className="min-h-[70dvh] w-full flex-1 border-0" sandbox="allow-scripts allow-same-origin allow-popups" />
-            </section>
-          )}
+          {activeTab === 'project_progress' && <GitHubEvidencePanel />}
 
           {activeTab === 'github' && (
             <GitHubExportView />

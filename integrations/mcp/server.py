@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 BASE = os.environ.get("BASTILLA_API_URL", "http://127.0.0.1:3000").rstrip("/")
 TIMEOUT = float(os.environ.get("BASTILLA_API_TIMEOUT", "90"))
 READ_ONLY = os.environ.get("BASTILLA_MCP_READ_ONLY", "1").strip().lower() not in {"0", "false", "no"}
-mcp = FastMCP("BastillaOS Ollama Bridge", host="127.0.0.1", port=8000, json_response=True)
+mcp = FastMCP("BastillaOS MCP Bridge", host="127.0.0.1", port=8000, json_response=True)
 
 async def request(method: str, path: str, payload=None):
     async with httpx.AsyncClient(timeout=TIMEOUT, trust_env=False) as client:
@@ -34,9 +34,9 @@ async def ollama_status() -> dict:
 
 @mcp.tool()
 async def agents_status() -> dict:
-    """Read Aria, Alex, Astyria and Aurelius background connectivity diagnostics.
+    """Read Aria, Alex, Astyria and Aurelius process states as unverified.
 
-    This endpoint reports Ollama/model monitoring, not proof of active inference.
+    Ollama/model monitoring does not prove that an agent process is running.
     """
     return await request("GET", "/api/agents/background/status")
 

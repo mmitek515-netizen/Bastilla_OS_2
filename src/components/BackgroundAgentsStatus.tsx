@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
-type AgentStatus = { enabled: boolean; lastCheck: string | null; status: 'waiting' | 'online' | 'offline'; error: string | null };
-type Response = { monitoring: boolean; intervalMs: number; agents: Record<string, AgentStatus>; note: string };
+type AgentStatus = { enabled: boolean; lastCheck: string | null; status: 'unverified'; error: string | null };
+type Response = { monitoring: boolean; intervalMs: number; agents: Record<string, AgentStatus>; ollama: { connected: boolean; checkedAt: string | null }; note: string };
 export function BackgroundAgentsStatus() {
   const [data, setData] = useState<Response | null>(null);
   const [error, setError] = useState(false);
@@ -36,12 +36,14 @@ export function BackgroundAgentsStatus() {
           const agent = data?.agents[name];
           return <div key={name} className="rounded-lg border border-slate-700 bg-slate-900 p-3">
             <div className="font-medium">{name}</div>
-            <div className="text-xs text-slate-400">{error ? 'Brak połączenia z serwerem' : agent?.status === 'online' ? 'Ollama dostępna' : agent?.status === 'offline' ? 'Ollama niedostępna' : 'Oczekiwanie na pomiar'}</div>
-            <div className="mt-1 text-xs text-slate-500">{agent?.lastCheck ? new Date(agent.lastCheck).toLocaleTimeString('pl-PL') : '—'}</div>
+            <div className="text-xs text-amber-300">{error ? 'Brak danych' : agent?.status === 'unverified' ? 'Status niezweryfikowany' : 'Brak danych'}</div>
           </div>;
         })}
       </div>
-      <p className="text-xs text-slate-500">Monitoring sprawdza wspólne połączenie z Ollama. Nie oznacza, że każdy agent prowadzi autonomiczne obliczenia.</p>
+      <p className="text-xs text-slate-500">
+        {error ? 'Stan Ollama niedostępny.' : `Ollama: ${data?.ollama.connected ? 'połączona' : 'niedostępna'}${data?.ollama.checkedAt ? ` · pomiar ${new Date(data.ollama.checkedAt).toLocaleTimeString('pl-PL')}` : ''}.`}
+        {' '}Dostępność modelu nie dowodzi działania procesu agenta.
+      </p>
     </section>
   );
 }

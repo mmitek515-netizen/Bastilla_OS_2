@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# Start BastillaOS and its local MCP bridge; verify real Ollama reachability.
+# Start BastillaOS and its local MCP bridge; Ollama is optional.
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 export PORT="${PORT:-3000}"
 export BASTILLA_API_URL="${BASTILLA_API_URL:-http://127.0.0.1:${PORT}}"
-export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-export LLM_PROVIDERS="${LLM_PROVIDERS:-ollama}"
 VENV=".venv-mcp"
 mkdir -p .runtime
 pids=()
@@ -25,22 +23,7 @@ wait_http() {
 if ! command -v curl >/dev/null 2>&1; then report "ERROR: curl missing"; exit 1; fi
 if ! command -v node >/dev/null 2>&1; then report "ERROR: Node.js missing"; exit 1; fi
 if ! command -v python3 >/dev/null 2>&1; then report "ERROR: Python 3 missing"; exit 1; fi
-if ! command -v ollama >/dev/null 2>&1; then
-  report "Ollama binary not found. Set up Ollama on this host first (npm run setup:ollama)."
-elif curl -fsS --max-time 3 "${OLLAMA_BASE_URL%/}/api/tags" >/dev/null 2>&1; then
-  report "Ollama reachable: ${OLLAMA_BASE_URL}"
-else
-  report "Ollama not responding. Attempting local ollama serve..."
-  if [[ "$OLLAMA_BASE_URL" == "http://127.0.0.1:11434" ]]; then
-    OLLAMA_HOST=127.0.0.1:11434 ollama serve >.runtime/ollama.log 2>&1 &
-    pids+=("$!")
-  fi
-fi
-if wait_http "${OLLAMA_BASE_URL%/}/api/tags" 15; then
-  report "Ollama API ONLINE"
-else
-  report "WARNING: Ollama API OFFLINE; MCP diagnostics will show connected=false."
-fi
+report "Ollama is optional; MCP core tools do not require it."
 if [[ ! -x node_modules/.bin/tsx ]]; then report "Installing npm dependencies..."; npm ci; fi
 if curl -fsS --max-time 2 "${BASTILLA_API_URL%/}/api/ai/status" >/dev/null 2>&1; then
   report "BastillaOS API already online: ${BASTILLA_API_URL}"
@@ -72,8 +55,5 @@ if ! "$VENV/bin/python" integrations/mcp/smoke_test.py; then
 fi
 report "MCP OK (local): http://127.0.0.1:8000/mcp/"
 report "Codespaces port 8000 must remain PRIVATE. ChatGPT cannot connect directly to a private Codespaces port."
-report "Ollama diagnostics:"
-curl -fsS --max-time 10 "${BASTILLA_API_URL%/}/api/ollama/models" || true
-printf '\n'
 report "Running; Ctrl+C stops processes started by this script. Do not publish ports 3000/8000 without authentication."
 wait

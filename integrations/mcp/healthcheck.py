@@ -9,11 +9,12 @@ async def main():
     async with streamablehttp_client(url, timeout=5) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
+            await session.send_ping()
             names = {item.name for item in (await session.list_tools()).tools}
-            required = {"ollama_status", "agents_status", "vm_status"}
+            required = {"agents_status", "vm_status"}
             if not required.issubset(names):
                 raise RuntimeError(f"Missing tools: {sorted(required - names)}")
-            print("MCP handshake OK; tools:", ", ".join(sorted(names)))
+            print("MCP initialize/ping/tools/list OK; tools:", ", ".join(sorted(names)))
 
 if __name__ == "__main__":
     asyncio.run(main())
