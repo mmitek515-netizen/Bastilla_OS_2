@@ -6376,7 +6376,7 @@ app.post('/api/agent-tasks/run', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Tytuł lub opis zadania ma nieprawidłowy format albo długość.' });
     }
     const requestedAction = String(actionType || executionType || 'ai_task');
-    const taskActions = ['ai_task', 'audit_system_integrity', 'scaffold_app', 'write_app_file'];
+    const taskActions = ['ai_task', 'audit_system_integrity', 'scaffold_app', 'write_app_file', 'generic_diag'];
     if (!taskActions.includes(requestedAction)) {
       return res.status(400).json({ success: false, error: 'Nieobsługiwany typ akcji.' });
     }

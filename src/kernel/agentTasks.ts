@@ -123,7 +123,7 @@ class AgentTaskRegistry {
             if (LEGACY_SEEDED_TASK_IDS.has(task.id)) {
               task.status = 'blocked';
               task.blockedReason = 'Wpis startowy nie potwierdza rzeczywistego wykonania.';
-              task.error = task.blockedReason;
+              task.error = undefined;
               delete task.artifact;
               delete task.result;
               task.logs.push(`[${new Date().toISOString()}] Wpis startowy przeniesiono do blocked; brak dowodu wykonania.`);
@@ -132,7 +132,7 @@ class AgentTaskRegistry {
             if (task.status === 'running' || task.status === 'queued') {
               task.status = 'blocked';
               task.blockedReason = 'Serwer uruchomił się ponownie; wykonawca zadania nie został odtworzony.';
-              task.error = task.blockedReason;
+              task.error = undefined;
               task.logs.push(`[${new Date().toISOString()}] Wstrzymano zadanie po restarcie; wymagane jawne ponowienie.`);
               recovered = true;
             }
@@ -302,7 +302,6 @@ class AgentTaskRegistry {
       if (task.status !== 'blocked' || task.blockedReason !== reason) {
         task.status = 'blocked';
         task.blockedReason = reason;
-        task.error = reason;
         task.logs.push(`[${new Date().toISOString()}] Zablokowano: ${reason}`);
         this.audit(task, 'task.blocked');
       }
@@ -445,6 +444,32 @@ class AgentTaskRegistry {
       }, null, 2), 'utf-8');
       return {
         result: `Wykonano ${Object.values(checks).filter(Boolean).length}/${Object.keys(checks).length} kontroli.`,
+        artifact: { path: path.relative(path.resolve('.'), reportPath), name: path.basename(reportPath), sizeBytes: fs.statSync(reportPath).size },
+      };
+    }
+
+    if (job.actionType === 'generic_diag') {
+      const reportPath = path.resolve('exports', `diag_${task.agent.toLowerCase()}_${task.id}.json`);
+      fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+      const report = {
+        taskId: task.id,
+        agent: task.agent,
+        title: task.title,
+        timestamp: new Date().toISOString(),
+        status: 'PROCESS_DIAGNOSTICS_CAPTURED',
+        process: {
+          nodeVersion: process.version,
+          uptimeSeconds: process.uptime(),
+          memoryUsageBytes: process.memoryUsage(),
+        },
+        checks: {
+          serverEntrypoint: fs.existsSync(path.resolve('server.ts')),
+          packageManifest: fs.existsSync(path.resolve('package.json')),
+        },
+      };
+      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+      return {
+        result: 'Zapisano diagnostykę procesu serwera; nie określa ona dostępności usług zewnętrznych.',
         artifact: { path: path.relative(path.resolve('.'), reportPath), name: path.basename(reportPath), sizeBytes: fs.statSync(reportPath).size },
       };
     }

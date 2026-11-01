@@ -328,3 +328,26 @@ test('AgentTaskRegistry: unsupported action fails instead of producing a fake di
   assert.match(finished.error, /Nieobsługiwany typ akcji/);
   assert.equal(finished.artifact, undefined);
 });
+
+test('AgentTaskRegistry: generic diagnostics contain measured process data without claiming services are online', async () => {
+  const task = await agentTaskRegistry.runTask({
+    agent: 'Aurelius',
+    title: 'Rzeczywista diagnostyka procesu',
+    description: 'Zapisz mierzalne dane procesu serwera.',
+    actionType: 'generic_diag',
+  });
+
+  let finished;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finished = agentTaskRegistry.getById(task.id);
+    if (finished?.status === 'completed' || finished?.status === 'failed') break;
+  }
+  assert.equal(finished?.status, 'completed');
+  const report = JSON.parse(fs.readFileSync(path.resolve(finished.artifact.path), 'utf8'));
+  assert.equal(report.status, 'PROCESS_DIAGNOSTICS_CAPTURED');
+  assert.equal(report.process.nodeVersion, process.version);
+  assert.equal(report.process.uptimeSeconds > 0, true);
+  assert.equal(report.systemStatus, undefined);
+  fs.rmSync(path.resolve(finished.artifact.path), { force: true });
+});

@@ -167,6 +167,7 @@ export const BastillaOS2View: React.FC = () => {
 
   const handleTaskDecision = async (id: string, action: 'approve' | 'retry') => {
     if (action === 'approve' && !window.confirm('Zatwierdzić i wykonać tę operację?')) return;
+    setRunError('');
     try {
       const res = await fetch(`/api/agent-tasks/${encodeURIComponent(id)}/${action}`, {
         method: 'POST',
@@ -350,6 +351,11 @@ export const BastillaOS2View: React.FC = () => {
               Powiadomienie: {notifications[0].event} · {notifications[0].taskId} · {new Date(notifications[0].timestamp).toLocaleString('pl-PL')}
             </p>
           )}
+          {runError && !isModalOpen && (
+            <p role="alert" className="border-b border-red-200 bg-red-50 px-5 py-2 text-xs text-red-800">
+              {runError}
+            </p>
+          )}
 
           {loading ? (
             <div className="p-12 text-center text-xs text-[#736758]">Ładowanie rejestru zadań…</div>
@@ -441,6 +447,11 @@ export const BastillaOS2View: React.FC = () => {
                         <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
                         <span>{task.error}</span>
                       </div>
+                    )}
+                    {task.blockedReason && (
+                      <p className="text-xs text-orange-800 bg-orange-50 p-2.5 rounded-lg border border-orange-200">
+                        Zablokowano: {task.blockedReason}
+                      </p>
                     )}
                     {task.scheduledAt && (
                       <p className="text-[11px] text-[#736758]">
@@ -554,6 +565,7 @@ export const BastillaOS2View: React.FC = () => {
                   <option value="audit_system_integrity">Audyt integralności jądra (tworzy exports/system_integrity_report.json)</option>
                   <option value="scaffold_app">Inicjalizacja/audyt aplikacji w apps/ (tworzy app.json)</option>
                   <option value="write_app_file">Zapis bezpiecznego pliku w apps/ (tworzy katalog i manifest)</option>
+                  <option value="generic_diag">Diagnostyka procesu serwera (bez deklarowania dostępności usług)</option>
                 </select>
                 {actionType === 'ai_task' && (
                   <p className="mt-1 text-[11px] text-[#736758]">Model przygotuje odpowiedź; nie uruchamia poleceń ani nie zmienia plików projektu.</p>

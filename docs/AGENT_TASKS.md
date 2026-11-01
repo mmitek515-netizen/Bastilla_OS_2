@@ -10,15 +10,16 @@ execute the model's suggestions or modify project files.
 Set `BASTILLA_AGENT_TASKS_TOKEN` in the deployment environment to enable
 mutations. Never commit the token or put it in a public URL. The run, cancel,
 approve and retry endpoints require the configured token in the HTTP
-Authorization header. Keep the server port private; the task list endpoint remains readable without a token
-for compatibility and includes task descriptions, logs and results.
+Authorization header. Keep the server port private; the task list endpoint
+remains readable without a token for compatibility and includes task
+descriptions, logs and results.
 
 Supported actions are `ai_task`, `audit_system_integrity`, `scaffold_app` and
-`write_app_file`. The last two require an explicit operator approval before
-writing under `apps/`. App identifiers and filenames are validated and
-write-file paths are constrained to the selected app directory. The old
-`generic_diag` action is rejected because its former output claimed an
-`ONLINE` system state without checking a real service.
+`write_app_file`, plus `generic_diag` for measured server-process data. The
+file-writing actions require explicit operator approval before writing under
+`apps/`. App identifiers and filenames are validated and write-file paths are
+constrained to the selected app directory. Generic diagnostics do not assert
+the availability of external services.
 
 `POST /api/agent-tasks/run` accepts optional `dependsOn` (up to 20 existing
 task IDs), `scheduledAt` (an ISO date, at most one year ahead) and `timeoutMs`
@@ -40,8 +41,9 @@ are not resumed automatically because the executor cannot be safely restored.
 
 ## Audit and notifications
 
-Task state is stored in `data/agent_tasks.json`; append-only transition events
-are written to `data/agent_task_audit.jsonl`. The task list response includes
+By default, task state is stored in `data/agent_tasks.json`; append-only
+transition events are written to `data/agent_task_audit.jsonl`. Set
+`BASTILLA_AGENT_TASKS_DIR` to use a different local runtime directory. The task list response includes
 recent completion, failure, retry and blocked notifications. Both paths are
 runtime state and are ignored by Git.
 
