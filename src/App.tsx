@@ -77,6 +77,8 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<TabId>(initialTabFromLocation);
   const [isAgentLoading, setIsAgentLoading] = useState(false);
+  const [streamedReply, setStreamedReply] = useState('');
+  const streamingControllerRef = useRef<AbortController | null>(null);
   const [terminalBusy, setTerminalBusy] = useState(false);
   const terminalPendingRef = useRef(0);
   const [agentError, setAgentError] = useState<string | null>(null);
@@ -308,7 +310,46 @@ export default function App() {
   const handleRunAstyriaMission = async (action: AstyriaMissionAction) => {
     setIsAgentLoading(true);
     setAgentError(null);
+    setStreamedReply('');
     try {
+      if (attachments.length === 0 && !message.trim().startsWith('/')) {
+        const controller = new AbortController();
+        streamingControllerRef.current = controller;
+        const response = await fetch('/api/triad/message/without-nlp-stream', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, agent: chatAgent }), signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error('Nie udało się uruchomić strumienia bez NLP.');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let completed = false;
+        let combined = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line) as {type: string; agent?: string; text?: string; error?: string; state?: {store: unknown}};
+            if (event.type === 'agent_reply' && event.text) {
+              combined += (combined ? '\\n\\n' : '') + (chatAgent === 'triad' ? event.agent + ':\\n' : '') + event.text;
+              setStreamedReply(combined);
+            }
+            if (event.type === 'error') throw new Error(event.error || 'Błąd silnika bez NLP.');
+            if (event.type === 'done') {
+              const normalized = normalizeDataStore(event.state?.store);
+              setDataStore(normalized);
+              localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(normalized));
+              completed = true;
+            }
+          }
+        }
+        if (!completed) throw new Error('Strumień zakończony bez potwierdzenia zapisu historii.');
+        return;
+      }
       const response = await fetch('/api/astyria/mission', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -426,6 +467,8 @@ export default function App() {
       setAgentError(messageText);
       throw error;
     } finally {
+      streamingControllerRef.current = null;
+      setStreamedReply('');
       setIsAgentLoading(false);
     }
   };
@@ -537,6 +580,8 @@ export default function App() {
               onRunAstyriaMission={handleRunAstyriaMission}
               isLoading={isAgentLoading}
               sendError={agentError}
+              streamedReply={streamedReply}
+              onStopGeneration={() => streamingControllerRef.current?.abort()}
               onClearHistory={handleClearHistory}
               onForceSync={handleForceSync}
             />
