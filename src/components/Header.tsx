@@ -12,6 +12,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport, onSyncSystem, onUnclog, onRestoreBackup }) => {
+  const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(false);
@@ -105,6 +106,16 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
               </span>
             </span>
           </div>
+        </div>
+
+        <div className="relative ml-auto mr-12 lg:mr-0">
+          <button type="button" aria-label="Opcje Bastilla OS 2" aria-expanded={quickMenuOpen} onClick={() => setQuickMenuOpen(v => !v)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-600 bg-slate-800 text-sm font-semibold text-white" title="Opcje konta i systemu">•••</button>
+          {quickMenuOpen && <div className="absolute right-0 top-12 z-[80] w-52 rounded-xl border border-slate-700 bg-[#101827] p-1 shadow-2xl">
+            <button className="min-h-11 w-full rounded-lg px-3 text-left text-xs text-slate-200 hover:bg-slate-700" onClick={() => { setQuickMenuOpen(false); onShowReport(); }}>Raport systemu</button>
+            <button className="min-h-11 w-full rounded-lg px-3 text-left text-xs text-slate-200 hover:bg-slate-700" onClick={() => { setQuickMenuOpen(false); handleDownloadMonolith(); }}>Pobierz kod .py</button>
+            {onSyncSystem && <button className="min-h-11 w-full rounded-lg px-3 text-left text-xs text-slate-200 hover:bg-slate-700" onClick={() => { setQuickMenuOpen(false); void handleTriggerSync(); }}>Synchronizuj</button>}
+          </div>}
         </div>
 
         {/* Runtime State Indicators */}
