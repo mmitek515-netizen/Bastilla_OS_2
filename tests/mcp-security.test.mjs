@@ -37,3 +37,14 @@ test('MCP RPC must not permit wildcard CORS origin', () => {
 });
 
 // These source-level tests are regression guards, not HTTP or external-client proof.
+
+test('MCP tools/call validates tool name and argument shape', () => {
+  assert.match(handler, /MCP_TOOLS\.some\(\(tool\) => tool\.name === toolName\)/);
+  assert.match(handler, /Array\.isArray\(toolArguments\)/);
+  assert.match(handler, /Invalid MCP tool name or arguments/);
+});
+
+test('MCP JSON-RPC does not expose exception messages', () => {
+  assert.match(handler, /Internal MCP error/);
+  assert.doesNotMatch(handler, /error\?\.message/);
+});
