@@ -28,6 +28,8 @@ export interface SyncEvent {
 export class LocalSyncBus {
   private listeners = new Set<(event: SyncEvent) => void>();
   private lastRevision = new Map<string, number>();
+  private seenIds = new Set<string>();
+  private readonly maxTrackedEvents = 2000;
 
   subscribe(listener: (event: SyncEvent) => void): () => void {
     this.listeners.add(listener);
@@ -35,16 +37,22 @@ export class LocalSyncBus {
   }
 
   publish(event: SyncEvent): boolean {
-    if (!SYNC_DOMAINS.includes(event.domain) || !Number.isSafeInteger(event.revision) || event.revision < 1) {
+    if (!SYNC_DOMAINS.includes(event.domain) || !['queued', 'saved', 'syncing', 'confirmed', 'failed', 'conflict'].includes(event.phase) || !['backend', 'preview', 'github', 'ai-studio', 'codespaces'].includes(event.target) || !Number.isSafeInteger(event.revision) || event.revision < 1) {
       throw new Error('Invalid sync event');
     }
-    if (!event.id || !event.resourceId || !Number.isFinite(Date.parse(event.timestamp))) {
+    if (typeof event.id !== 'string' || !event.id.trim() || typeof event.resourceId !== 'string' || !event.resourceId.trim() || (event.projectId !== undefined && typeof event.projectId !== 'string') || typeof event.timestamp !== 'string' || !Number.isFinite(Date.parse(event.timestamp))) {
       throw new Error('Invalid sync event metadata');
     }
-    const key = [event.domain, event.projectId ?? '', event.resourceId, event.target].join(':');
+    if (this.seenIds.has(event.id)) return false;
+    const key = JSON.stringify([event.domain, event.projectId ?? '', event.resourceId, event.target]);
     const previous = this.lastRevision.get(key) ?? 0;
     if (event.revision < previous) return false;
     this.lastRevision.set(key, event.revision);
+    this.seenIds.add(event.id);
+    if (this.seenIds.size > this.maxTrackedEvents) {
+      const oldest = this.seenIds.values().next().value;
+      if (oldest !== undefined) this.seenIds.delete(oldest);
+    }
     for (const listener of this.listeners) {
       try { listener(event); } catch { /* one UI subscriber cannot block others */ }
     }
