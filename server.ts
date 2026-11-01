@@ -12,7 +12,7 @@ import os from 'os';
 import { randomUUID, createHash } from 'crypto';
 import { INITIAL_DATA_STORE } from './src/kernel/svlKernel';
 import type { ChatSystemChange } from './src/kernel/chatChanges';
-import { resolveServerHost } from './src/kernel/serverHost';
+import { isAutoGitSyncEnabled, isAutonomousMissionEnabled, resolveServerHost } from './src/kernel/serverConfig';
 import { withoutNlpEngine } from './src/lib/withoutNlpEngine';
 import {
   DEFAULT_OLLAMA_BASE_URL,
@@ -2461,7 +2461,7 @@ export interface HealedIncident {
 }
 
 const systemLogs: SystemLogEntry[] = [];
-const AUTONOMOUS_MISSION_ENABLED = process.env.BASTILLA_AUTONOMOUS_MISSION === 'true';
+const AUTONOMOUS_MISSION_ENABLED = isAutonomousMissionEnabled();
 let autoRepairEnabled = AUTONOMOUS_MISSION_ENABLED;
 let continuousMissionEnabled = AUTONOMOUS_MISSION_ENABLED;
 let triadaGithubAutoPush = false;
@@ -2632,7 +2632,7 @@ setInterval(() => {
       `[MISJA TRIADY: ${TRIADA_MISSION_DIRECTIVE}] Cykl autonomii w tle: Alex (infrastruktura), Astyria (optymalizacja VM), Aurelius (audyt) — ROOT RING-0 aktywny.`
     );
     void deployAgentArtifacts('auto-background').then((deployed) => {
-      if (deployed.length > 0) {
+      if (deployed.length > 0 && isAutoGitSyncEnabled()) {
         void runPythonKernel([
           '--action', 'batch_msg',
           '--msgs_json', JSON.stringify([
@@ -3376,7 +3376,7 @@ app.get('/api/github/auto-sync/status', (_req, res) => {
 });
 
 async function startAutoGitSync(): Promise<void> {
-  if (process.env.BASTILLA_AUTO_GIT_SYNC !== 'true') {
+  if (!isAutoGitSyncEnabled()) {
     autoGitSyncEnabled = false;
     triadaGithubAutoPush = false;
     pushSystemLog('info', 'KERNEL', '[GITHUB AUTO] Synchronizacja commit/push wyłączona; ustaw BASTILLA_AUTO_GIT_SYNC=true, aby jawnie ją włączyć.');
@@ -6493,11 +6493,11 @@ async function bootstrapTriadMission() {
     // Autonomous background mutation is disabled unless explicitly enabled by the operator.
     continuousMissionEnabled = AUTONOMOUS_MISSION_ENABLED;
     autoRepairEnabled = AUTONOMOUS_MISSION_ENABLED;
-    triadaGithubAutoPush = process.env.BASTILLA_AUTO_GIT_SYNC === 'true' && config.github_auto_push === true;
+    triadaGithubAutoPush = isAutoGitSyncEnabled();
     pushSystemLog(
-      'healed',
+      'info',
       'KERNEL',
-      `[MISJA TRIADY] ${TRIADA_MISSION_DIRECTIVE} ${alreadyActive ? 'potwierdzona' : 'aktywowana'} — agenci: Alex, Astyria, Aurelius (ROOT RING-0, autonomia w tle).`
+      `[MISJA TRIADY] ${TRIADA_MISSION_DIRECTIVE} ${alreadyActive ? 'potwierdzona' : 'skonfigurowana'} — autonomia w tle ${AUTONOMOUS_MISSION_ENABLED ? 'włączona przez operatora' : 'wyłączona'}.`
     );
   } catch (err: any) {
     pushSystemLog('error', 'KERNEL', `[MISJA TRIADY] Bootstrap nie powiódł się: ${err?.message || err}`);

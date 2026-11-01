@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { agentTaskRegistry } from '../src/kernel/agentTasks.ts';
 
@@ -115,4 +116,41 @@ test('AgentTaskRegistry: write_app_file creates app directory and manifest autom
 
   // Clean up test app
   fs.rmSync(path.resolve('apps', testAppId), { recursive: true, force: true });
+});
+
+test('AgentTaskRegistry: rejects a dangling symlink before writing app content', async () => {
+  const testAppId = `test-dangling-symlink-${Date.now()}`;
+  const appDir = path.resolve('apps', testAppId);
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bastilla-task-'));
+  const outsideFile = path.join(outsideDir, 'outside.txt');
+  fs.mkdirSync(appDir, { recursive: true });
+  fs.symlinkSync(outsideFile, path.join(appDir, 'config.json'));
+
+  try {
+    const task = await agentTaskRegistry.runTask({
+      agent: 'Alex',
+      title: 'Odrzucenie wiszącego dowiązania',
+      description: 'Dowiązanie symboliczne nie może przekierować zapisu.',
+      actionType: 'write_app_file',
+      payload: { appId: testAppId, filename: 'config.json', content: 'unsafe' },
+    });
+
+    let completed = null;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const current = agentTaskRegistry.getById(task.id);
+      if (current && (current.status === 'completed' || current.status === 'failed')) {
+        completed = current;
+        break;
+      }
+    }
+
+    assert.ok(completed);
+    assert.equal(completed.status, 'failed');
+    assert.match(completed.error, /Plik aplikacji nie może być dowiązaniem symbolicznym/);
+    assert.equal(fs.existsSync(outsideFile), false);
+  } finally {
+    fs.rmSync(appDir, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
 });

@@ -52,20 +52,50 @@ function validateAppFilename(value: unknown): string {
   return value;
 }
 
+function resolveInside(root: string, child: string): string {
+  const resolvedRoot = path.resolve(root);
+  const resolvedPath = path.resolve(resolvedRoot, child);
+  const relativePath = path.relative(resolvedRoot, resolvedPath);
+  if (
+    !relativePath
+    || relativePath === '..'
+    || relativePath.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativePath)
+  ) {
+    throw new Error('Ścieżka aplikacji musi pozostać wewnątrz katalogu apps/.');
+  }
+  return resolvedPath;
+}
+
+function resolveAppDirectory(appId: unknown): string {
+  return resolveInside(path.resolve('apps'), validateAppId(appId));
+}
+
+function resolveAppFile(appDir: string, filename: unknown): string {
+  return resolveInside(appDir, validateAppFilename(filename));
+}
+
 function assertSafeAppDirectory(appDir: string): void {
   const appsRoot = path.resolve('apps');
-  if (fs.lstatSync(appsRoot).isSymbolicLink() || fs.lstatSync(appDir).isSymbolicLink()) {
+  if (fs.lstatSync(appsRoot).isSymbolicLink()) {
     throw new Error('Katalog aplikacji nie może być dowiązaniem symbolicznym.');
   }
   const realAppsRoot = fs.realpathSync(appsRoot);
   const realAppDir = fs.realpathSync(appDir);
-  if (!realAppDir.startsWith(`${realAppsRoot}${path.sep}`)) {
+  if (realAppDir !== path.join(realAppsRoot, path.basename(appDir))) {
     throw new Error('Katalog aplikacji musi znajdować się wewnątrz apps/.');
   }
 }
 
 function assertNotSymlink(filePath: string): void {
-  if (fs.existsSync(filePath) && fs.lstatSync(filePath).isSymbolicLink()) {
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (stats.isSymbolicLink()) {
     throw new Error('Plik aplikacji nie może być dowiązaniem symbolicznym.');
   }
 }
@@ -336,13 +366,13 @@ class AgentTaskRegistry {
         appendLog(`Weryfikacja/tworzenie struktury aplikacji apps/${appId}...`);
         await new Promise((r) => setTimeout(r, 400));
 
-        const appDir = path.resolve('apps', appId);
+        const appDir = resolveAppDirectory(appId);
         if (!fs.existsSync(appDir)) {
           fs.mkdirSync(appDir, { recursive: true });
         }
         assertSafeAppDirectory(appDir);
 
-        const manifestPath = path.join(appDir, 'app.json');
+        const manifestPath = resolveAppFile(appDir, 'app.json');
         assertNotSymlink(manifestPath);
         if (!fs.existsSync(manifestPath)) {
           const manifest = {
@@ -373,19 +403,19 @@ class AgentTaskRegistry {
         const content = payload.content || JSON.stringify({ updated: true, agent: task.agent, timestamp: new Date().toISOString() }, null, 2);
 
         appendLog(`Zapisywanie pliku ${filename} do apps/${appId}...`);
-        const appDir = path.resolve('apps', appId);
+        const appDir = resolveAppDirectory(appId);
         if (!fs.existsSync(appDir)) {
           fs.mkdirSync(appDir, { recursive: true });
           appendLog(`Utworzono brakujący katalog aplikacji apps/${appId}.`);
         }
         assertSafeAppDirectory(appDir);
 
-        const filePath = path.join(appDir, filename);
+        const filePath = resolveAppFile(appDir, filename);
         assertNotSymlink(filePath);
         fs.writeFileSync(filePath, content, 'utf-8');
         appendLog(`Zapisano plik apps/${appId}/${filename}.`);
 
-        const mPath = path.join(appDir, 'app.json');
+        const mPath = resolveAppFile(appDir, 'app.json');
         assertNotSymlink(mPath);
         if (fs.existsSync(mPath)) {
           try {
