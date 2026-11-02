@@ -17,6 +17,7 @@ const MAX_SESSIONS = 100;
 const MAX_TASKS = 100;
 const MAX_EVENTS = 200;
 const MAX_TASK_RESULT_BYTES = 16_000;
+const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'cancel_requested']);
 const AGENTS = {
   aria: { name: 'Aria', role: 'Interfejs, dostępność i wygoda obsługi.' },
   astyria: { name: 'Astyria', role: 'Intencje czatu i bezpieczne, kontrolowane operacje.' },
@@ -203,7 +204,6 @@ function taskEvent(store, task, status) {
     } else {
       state.tasks.push({ ...task, result: boundedTaskResult(task.result), status, updated_at: timestamp });
     }
-    state.tasks = state.tasks.slice(-MAX_TASKS);
     state.events.push({
       at: timestamp,
       type: `task.${status}`,
@@ -211,10 +211,44 @@ function taskEvent(store, task, status) {
       task_id: task.id,
     });
     state.events = state.events.slice(-MAX_EVENTS);
+    const active = state.tasks.filter((item) => ACTIVE_TASK_STATUSES.has(item.status));
+    const finished = state.tasks.filter((item) => !ACTIVE_TASK_STATUSES.has(item.status));
+    state.tasks = [
+      ...finished.slice(-Math.max(0, MAX_TASKS - active.length)),
+      ...active,
+    ];
+  });
+}
+
+function reconcileInterruptedTasks(store) {
+  const interrupted = store.read().tasks.some((task) =>
+    ACTIVE_TASK_STATUSES.has(task.status));
+  if (!interrupted) return;
+
+  const timestamp = now();
+  store.update((state) => {
+    const events = [];
+    for (const task of state.tasks) {
+      if (!ACTIVE_TASK_STATUSES.has(task.status)) continue;
+      task.status = 'failed';
+      task.updated_at = timestamp;
+      task.error = 'process_restarted';
+      events.push({
+        at: timestamp,
+        type: 'task.failed',
+        agent: task.agent,
+        task_id: task.id,
+      });
+    }
+    state.events.push(...events);
+    state.events = state.events.slice(-MAX_EVENTS);
   });
 }
 
 function makeTask(store, agent, kind = 'chat') {
+  if (store.read().tasks.filter((task) => ACTIVE_TASK_STATUSES.has(task.status)).length >= MAX_TASKS) {
+    throw new ApiError(503, 'task_capacity_reached');
+  }
   const task = {
     id: randomUUID(),
     agent,
@@ -349,7 +383,7 @@ function chatError(error) {
   return new ApiError(500, 'chat_error');
 }
 
-function makeChatHandler({ store, chat, sessionLocks, workspaceRoot }) {
+function makeChatHandler({ store, chat, sessionLocks, activeTasks, workspaceRoot }) {
   return async (request, response, payload, streaming) => {
     if (
       !Object.hasOwn(payload, 'message') ||
@@ -370,105 +404,153 @@ function makeChatHandler({ store, chat, sessionLocks, workspaceRoot }) {
     }
 
     const sessionId = createSession(store, payload.session_id);
+    const task = makeTask(store, payload.agent);
+    const controller = new AbortController();
+    activeTasks.set(task.id, controller);
+    const message = payload.message.trim();
+    let sendSse;
+    let abortDisconnectedStream;
+    if (streaming) {
+      abortDisconnectedStream = () => {
+        if (!response.writableEnded) controller.abort();
+      };
+      response.once('close', abortDisconnectedStream);
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store',
+        'X-Accel-Buffering': 'no',
+        'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
+        'X-Content-Type-Options': 'nosniff',
+      });
+      sendSse = (event, data) => {
+        if (!response.destroyed) {
+          response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        }
+      };
+      sendSse('meta', { session_id: sessionId, task_id: task.id });
+    }
+
+    const finishCancellation = () => {
+      task.result = 'Request cancelled.';
+      task.error = 'request_cancelled';
+      chat.recordCancelledResponse(
+        message,
+        request.headers.authorization,
+        sessionId,
+        payload.agent,
+      );
+      taskEvent(store, task, 'cancelled');
+      const cancelledTask = mapTask({ ...task, status: 'cancelled', updated_at: now() });
+      if (streaming && response.headersSent) {
+        sendSse('cancelled', { error: 'request_cancelled', task: cancelledTask });
+        if (!response.destroyed) response.end();
+      } else if (!response.headersSent && !response.destroyed) {
+        sendJson(response, 409, {
+          error: 'request_cancelled',
+          task: cancelledTask,
+          session_id: sessionId,
+        });
+      }
+    };
+
     const previous = sessionLocks.get(sessionId) || Promise.resolve();
     const current = previous.catch(() => {}).then(async () => {
-      const task = makeTask(store, payload.agent);
-      taskEvent(store, task, 'running');
-      let sendSse;
-      if (streaming) {
-        response.writeHead(200, {
-          'Content-Type': 'text/event-stream; charset=utf-8',
-          'Cache-Control': 'no-cache, no-store',
-          'X-Accel-Buffering': 'no',
-          'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
-          'X-Content-Type-Options': 'nosniff',
-        });
-        sendSse = (event, data) => {
-          if (!response.destroyed) {
-            response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-          }
-        };
-        sendSse('meta', { session_id: sessionId, task_id: task.id });
-      }
       try {
-        const message = payload.message.trim();
-        if (
-          message.startsWith('/') &&
-          !['/help', '/status'].includes(message) &&
-          !message.startsWith('/terminal ')
-        ) {
-          throw new ApiError(400, 'unsupported_chat_command');
+        if (controller.signal.aborted || response.destroyed) {
+          if (!controller.signal.aborted) controller.abort();
+          finishCancellation();
+          return;
         }
-        const result = message.startsWith('/terminal ')
-          ? chat.recordLocalResponse(
-              message,
-              readOnlyTerminal(workspaceRoot, message.slice('/terminal '.length).trim()),
-              request.headers.authorization,
-              sessionId,
-              payload.agent,
-              'restricted_terminal',
-            )
-          : await chat.sendMessage(
-              message,
-              request.headers.authorization,
-              sessionId,
-              payload.agent,
-            );
-        task.result = result.reply;
-        taskEvent(store, task, 'completed');
-        const body = {
-          reply: result.reply,
-          source: apiSource(result.source),
-          agent: payload.agent,
-          session_id: sessionId,
-          task: mapTask({ ...task, status: 'completed', updated_at: now() }),
-        };
-        if (result.operation) {
-          body.operation = result.operation;
-          body.notice = result.notice;
-        }
-        if (streaming) {
-          const characters = Array.from(result.reply);
-          for (let index = 0; index < characters.length; index += 64) {
-            sendSse('delta', { text: characters.slice(index, index + 64).join('') });
+        taskEvent(store, task, 'running');
+        try {
+          if (
+            message.startsWith('/') &&
+            !['/help', '/status'].includes(message) &&
+            !message.startsWith('/terminal ')
+          ) {
+            throw new ApiError(400, 'unsupported_chat_command');
           }
-          sendSse('done', {
-            session_id: sessionId,
+          const result = message.startsWith('/terminal ')
+            ? chat.recordLocalResponse(
+                message,
+                readOnlyTerminal(workspaceRoot, message.slice('/terminal '.length).trim()),
+                request.headers.authorization,
+                sessionId,
+                payload.agent,
+                'restricted_terminal',
+              )
+            : await chat.sendMessage(
+                message,
+                request.headers.authorization,
+                sessionId,
+                payload.agent,
+                { signal: controller.signal },
+              );
+          task.result = result.reply;
+          taskEvent(store, task, 'completed');
+          const body = {
+            reply: result.reply,
             source: apiSource(result.source),
             agent: payload.agent,
-            task: { id: task.id, status: 'completed' },
-          });
-          if (!response.destroyed) response.end();
-        } else {
-          sendJson(response, 200, body);
-        }
-      } catch (error) {
-        const mappedError = error instanceof ApiError ? error : chatError(error);
-        task.error = mappedError.code;
-        taskEvent(store, task, 'failed');
-        if (streaming && response.headersSent) {
-          sendSse('error', {
-            error: mappedError.code,
-            task: mapTask({ ...task, status: 'failed', updated_at: now() }),
-          });
-          if (!response.destroyed) response.end();
-          return;
-        }
-        if (!response.headersSent) {
-          sendJson(response, mappedError.status, {
-            error: mappedError.code,
-            task: mapTask({ ...task, status: 'failed', updated_at: now() }),
             session_id: sessionId,
-          });
-          return;
+            task: mapTask({ ...task, status: 'completed', updated_at: now() }),
+          };
+          if (result.operation) {
+            body.operation = result.operation;
+            body.notice = result.notice;
+          }
+          if (streaming) {
+            const characters = Array.from(result.reply);
+            for (let index = 0; index < characters.length; index += 64) {
+              sendSse('delta', { text: characters.slice(index, index + 64).join('') });
+            }
+            sendSse('done', {
+              session_id: sessionId,
+              source: apiSource(result.source),
+              agent: payload.agent,
+              task: { id: task.id, status: 'completed' },
+            });
+            if (!response.destroyed) response.end();
+          } else {
+            sendJson(response, 200, body);
+          }
+        } catch (error) {
+          if (controller.signal.aborted) {
+            finishCancellation();
+            return;
+          }
+          const mappedError = error instanceof ApiError ? error : chatError(error);
+          task.error = mappedError.code;
+          taskEvent(store, task, 'failed');
+          if (streaming && response.headersSent) {
+            sendSse('error', {
+              error: mappedError.code,
+              task: mapTask({ ...task, status: 'failed', updated_at: now() }),
+            });
+            if (!response.destroyed) response.end();
+            return;
+          }
+          if (!response.headersSent && !response.destroyed) {
+            sendJson(response, mappedError.status, {
+              error: mappedError.code,
+              task: mapTask({ ...task, status: 'failed', updated_at: now() }),
+              session_id: sessionId,
+            });
+            return;
+          }
+          if (!response.destroyed) response.destroy();
         }
-        if (!response.destroyed) response.destroy();
+      } finally {
+        activeTasks.delete(task.id);
       }
     });
     sessionLocks.set(sessionId, current);
     try {
       await current;
     } finally {
+      if (abortDisconnectedStream) {
+        response.removeListener('close', abortDisconnectedStream);
+      }
       if (sessionLocks.get(sessionId) === current) sessionLocks.delete(sessionId);
     }
   };
@@ -494,6 +576,7 @@ export function createApiServer({
   mkdirSync(workspace, { recursive: true, mode: 0o700 });
   const workspaceRoot = realpathSync(workspace);
   const approvalQueue = queue || new ApprovalQueue({ operatorToken: token, store });
+  reconcileInterruptedTasks(store);
   const chat = new ChatService({
     model,
     queue: approvalQueue,
@@ -510,7 +593,14 @@ export function createApiServer({
     inference: 'not_verified',
   };
   const sessionLocks = new Map();
-  const chatHandler = makeChatHandler({ store, chat, sessionLocks, workspaceRoot });
+  const activeTasks = new Map();
+  const chatHandler = makeChatHandler({
+    store,
+    chat,
+    sessionLocks,
+    activeTasks,
+    workspaceRoot,
+  });
 
   const server = createServer(async (request, response) => {
     try {
@@ -588,6 +678,35 @@ export function createApiServer({
       }
 
       if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed');
+      const cancelMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)\/cancel$/);
+      if (cancelMatch) {
+        if (
+          request.headers['transfer-encoding'] ||
+          (request.headers['content-length'] !== undefined &&
+            request.headers['content-length'] !== '0')
+        ) {
+          request.resume();
+          throw new ApiError(400, 'invalid_cancel_request');
+        }
+        const taskId = cancelMatch[1];
+        if (!isSessionId(taskId)) throw new ApiError(404, 'task_not_found');
+        const task = store.read().tasks.find((item) => item.id === taskId);
+        if (!task) throw new ApiError(404, 'task_not_found');
+        if (task.status === 'cancel_requested' || task.status === 'cancelled') {
+          sendJson(response, 200, { task: mapTask(task) });
+          return;
+        }
+        const controller = activeTasks.get(taskId);
+        if (!['queued', 'running'].includes(task.status) || !controller) {
+          throw new ApiError(409, 'task_not_running');
+        }
+        taskEvent(store, task, 'cancel_requested');
+        controller.abort();
+        sendJson(response, 202, {
+          task: mapTask({ ...task, status: 'cancel_requested', updated_at: now() }),
+        });
+        return;
+      }
       const decisionMatch = path.match(/^\/api\/v1\/operations\/([^/]+)\/decision$/);
       if (decisionMatch) {
         const payload = await readJson(request, response);

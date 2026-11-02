@@ -111,7 +111,7 @@ export class OllamaClient {
       .filter((name) => typeof name === 'string');
   }
 
-  async chat(messages) {
+  async chat(messages, { signal } = {}) {
     if (!Array.isArray(messages) || messages.length === 0) {
       throw new OllamaClientError('invalid_chat_context');
     }
@@ -121,7 +121,7 @@ export class OllamaClient {
       stream: false,
       format: 'json',
       messages,
-    });
+    }, signal);
     const content = result?.message?.content;
     if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > 16_000) {
       throw new OllamaClientError('invalid_provider_response');
@@ -130,17 +130,22 @@ export class OllamaClient {
     return content;
   }
 
-  async #request(path, body) {
+  async #request(path, body, signal) {
     let response;
+    const timeoutSignal = AbortSignal.timeout(this.#timeoutMs);
+    const requestSignal = signal
+      ? AbortSignal.any([signal, timeoutSignal])
+      : timeoutSignal;
     try {
       response = await this.#fetch(new URL(path, this.#baseUrl), {
         method: body === undefined ? 'GET' : 'POST',
         headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
         redirect: 'error',
-        signal: AbortSignal.timeout(this.#timeoutMs),
+        signal: requestSignal,
       });
     } catch {
+      if (signal?.aborted) throw new OllamaClientError('request_cancelled');
       throw new OllamaClientError('provider_unavailable');
     }
 
@@ -148,6 +153,7 @@ export class OllamaClient {
     try {
       text = await readBoundedBody(response);
     } catch (error) {
+      if (signal?.aborted) throw new OllamaClientError('request_cancelled');
       if (error instanceof OllamaClientError) throw error;
       throw new OllamaClientError('invalid_provider_response');
     }

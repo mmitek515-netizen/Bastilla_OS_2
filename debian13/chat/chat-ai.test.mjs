@@ -214,6 +214,21 @@ test('Ollama requests abort at the configured timeout', async () => {
   await assert.rejects(client.listModels(), { code: 'provider_unavailable' });
 });
 
+test('Ollama chat propagates caller cancellation to the provider request', async () => {
+  const controller = new AbortController();
+  const client = new OllamaClient({
+    model: 'local-model',
+    fetchImpl: (_url, { signal }) => new Promise((_, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }),
+  });
+  const pending = client.chat([{ role: 'user', content: 'hello' }], {
+    signal: controller.signal,
+  });
+  controller.abort();
+  await assert.rejects(pending, { code: 'request_cancelled' });
+});
+
 test('chat messages are bounded and history is operator-authorized', async () => {
   const chat = new ChatService({
     queue: createQueue(),

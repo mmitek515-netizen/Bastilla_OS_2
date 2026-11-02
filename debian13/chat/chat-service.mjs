@@ -126,10 +126,17 @@ export class ChatService {
     this.#store = store;
   }
 
-  async sendMessage(message, authorizationHeader, sessionId = this.#sessionId, agent = 'astyria') {
+  async sendMessage(
+    message,
+    authorizationHeader,
+    sessionId = this.#sessionId,
+    agent = 'astyria',
+    { signal } = {},
+  ) {
     this.#assertAuthorized(authorizationHeader);
     assertChatMessage(message);
     if (typeof sessionId !== 'string' || !sessionId) throw new ChatServiceError('invalid_session_id');
+    if (signal?.aborted) throw new ChatServiceError('request_cancelled');
 
     const intent = message === '/help' || message === '/status'
       ? null
@@ -159,7 +166,7 @@ export class ChatService {
           .slice(-this.#maxHistory),
         { role: 'user', content: message },
       ];
-      const result = parseModelResponse(await this.#model.chat(context));
+      const result = parseModelResponse(await this.#model.chat(context, { signal }));
       reply = result.reply;
       source = 'local-model';
       if (result.operation) {
@@ -187,7 +194,7 @@ export class ChatService {
       typeof sessionId !== 'string' ||
       !sessionId ||
       typeof agent !== 'string' ||
-      !['local_command', 'local_status', 'restricted_terminal'].includes(source)
+      !['local_command', 'local_status', 'restricted_terminal', 'cancelled'].includes(source)
     ) {
       throw new ChatServiceError('invalid_local_response');
     }
@@ -200,6 +207,17 @@ export class ChatService {
       source,
       verified: true,
     };
+  }
+
+  recordCancelledResponse(message, authorizationHeader, sessionId, agent) {
+    return this.recordLocalResponse(
+      message,
+      'Request cancelled.',
+      authorizationHeader,
+      sessionId,
+      agent,
+      'cancelled',
+    );
   }
 
   history(authorizationHeader, sessionId = this.#sessionId) {
@@ -242,7 +260,7 @@ export class ChatService {
         role: 'assistant',
         content: assistantMessage,
         source,
-        verified: ['application', 'local_command', 'local_status', 'restricted_terminal'].includes(source),
+        verified: ['application', 'local_command', 'local_status', 'restricted_terminal', 'cancelled'].includes(source),
         createdAt: timestamp,
         agent,
       },

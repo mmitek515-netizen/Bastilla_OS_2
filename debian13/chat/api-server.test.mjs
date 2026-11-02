@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -22,6 +23,7 @@ class TestModel {
 
 class DelayedModel {
   constructor() {
+    this.calls = 0;
     this.started = new Promise((resolve) => {
       this.resolveStarted = resolve;
     });
@@ -31,6 +33,7 @@ class DelayedModel {
   }
 
   async chat() {
+    this.calls += 1;
     this.resolveStarted();
     await this.completed;
     return JSON.stringify({ reply: 'delayed answer', operation: null });
@@ -38,6 +41,35 @@ class DelayedModel {
 
   release() {
     this.resolveCompleted();
+  }
+}
+
+class CancellableModel {
+  constructor() {
+    this.started = new Promise((resolve) => {
+      this.resolveStarted = resolve;
+    });
+    this.cancelled = new Promise((resolve) => {
+      this.resolveCancelled = resolve;
+    });
+  }
+
+  async chat(_messages, { signal } = {}) {
+    this.signal = signal;
+    this.resolveStarted();
+    return new Promise((_, reject) => {
+      const cancel = () => {
+        this.resolveCancelled();
+        const error = new Error('request_cancelled');
+        error.code = 'request_cancelled';
+        reject(error);
+      };
+      if (signal.aborted) {
+        cancel();
+        return;
+      }
+      signal.addEventListener('abort', cancel, { once: true });
+    });
   }
 }
 
@@ -57,9 +89,10 @@ async function startServer(
   model = new TestModel(),
   workspace = join(path, '..', 'workspace'),
 ) {
+  const store = new JsonStateStore(path);
   const server = createApiServer({
     token,
-    store: new JsonStateStore(path),
+    store,
     model,
     workspace,
     port: 0,
@@ -68,6 +101,7 @@ async function startServer(
   return {
     server,
     model,
+    store,
     base: `http://127.0.0.1:${server.address().port}`,
   };
 }
@@ -268,6 +302,267 @@ test('authorized task lookup returns persisted Work status after reconnect', asy
   assert.equal(missing.body.error, 'task_not_found');
   const malformed = await request(running.base, '/api/v1/tasks/not-a-uuid');
   assert.equal(malformed.status, 404);
+});
+
+test('API startup marks interrupted tasks failed instead of leaving them running', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'state.json');
+  const store = new JsonStateStore(path);
+  store.update((state) => {
+    state.tasks.push(
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        agent: 'astyria',
+        kind: 'chat',
+        status: 'running',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        result: null,
+        error: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        agent: 'astyria',
+        kind: 'chat',
+        status: 'cancel_requested',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        result: null,
+        error: null,
+      },
+    );
+  });
+  const { server, base } = await startServer(path);
+  t.after(() => stopServer(server));
+
+  for (const id of [
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000002',
+  ]) {
+    const response = await request(base, `/api/v1/tasks/${id}`);
+    assert.equal(response.body.task.status, 'failed');
+    assert.equal(response.body.task.error, 'process_restarted');
+  }
+});
+
+test('authorized streamed chat cancellation is delivered and persists across reconnect', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'state.json');
+  const model = new CancellableModel();
+  let running = await startServer(path, model);
+  t.after(() => stopServer(running.server));
+
+  const pendingResponse = fetch(`${running.base}/api/v1/chat/stream`, {
+    method: 'POST',
+    headers: { Authorization: authorization, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'Please answer and allow cancellation.', agent: 'astyria' }),
+  });
+  await model.started;
+  const response = await pendingResponse;
+  const reader = response.body.getReader();
+  const first = await reader.read();
+  const metadata = new TextDecoder().decode(first.value);
+  assert.match(metadata, /event: meta/);
+  const { session_id: sessionId, task_id: taskId } = JSON.parse(
+    metadata.match(/data: (.+)/)[1],
+  );
+  assert.ok(sessionId);
+  assert.ok(taskId);
+
+  const denied = await request(running.base, `/api/v1/tasks/${taskId}/cancel`, {
+    method: 'POST',
+    token: '',
+  });
+  assert.equal(denied.status, 401);
+  assert.equal(model.signal.aborted, false);
+
+  const cancellation = await request(running.base, `/api/v1/tasks/${taskId}/cancel`, {
+    method: 'POST',
+  });
+  assert.equal(cancellation.status, 202);
+  assert.equal(cancellation.body.task.status, 'cancel_requested');
+  assert.equal(model.signal.aborted, true);
+
+  let remaining = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    remaining += new TextDecoder().decode(value);
+  }
+  assert.match(remaining, /event: cancelled/);
+
+  const task = await request(running.base, `/api/v1/tasks/${taskId}`);
+  assert.equal(task.body.task.status, 'cancelled');
+  assert.equal(task.body.task.error, 'request_cancelled');
+  const history = await request(running.base, `/api/v1/sessions/${sessionId}/messages`);
+  assert.deepEqual(history.body.messages.map(({ role }) => role), ['user', 'assistant']);
+  assert.equal(history.body.messages[1].source, 'cancelled');
+
+  await stopServer(running.server);
+  running = await startServer(path, new CancellableModel());
+  const reconnectedTask = await request(running.base, `/api/v1/tasks/${taskId}`);
+  assert.equal(reconnectedTask.body.task.status, 'cancelled');
+  const reconnectedHistory = await request(
+    running.base,
+    `/api/v1/sessions/${sessionId}/messages`,
+  );
+  assert.deepEqual(reconnectedHistory.body, history.body);
+});
+
+test('disconnecting active SSE aborts the provider and persists cancellation', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'state.json');
+  const model = new CancellableModel();
+  const { server, base } = await startServer(path, model);
+  t.after(() => stopServer(server));
+
+  const url = new URL(`${base}/api/v1/chat/stream`);
+  const stream = await new Promise((resolve, reject) => {
+    let received = '';
+    const clientRequest = httpRequest(url, {
+      method: 'POST',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json',
+      },
+    }, (response) => {
+      response.on('data', (chunk) => {
+        received += chunk.toString('utf8');
+        if (received.includes('event: meta')) resolve({ clientRequest, received });
+      });
+    });
+    clientRequest.once('error', reject);
+    clientRequest.end(JSON.stringify({
+      message: 'Disconnect the active response.',
+      agent: 'astyria',
+    }));
+  });
+  await model.started;
+  const { session_id: sessionId, task_id: taskId } = JSON.parse(
+    stream.received.match(/data: (.+)/)[1],
+  );
+  stream.clientRequest?.destroy();
+  await model.cancelled;
+
+  let task;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    task = await request(base, `/api/v1/tasks/${taskId}`);
+    if (task.body.task.status === 'cancelled') break;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  assert.equal(model.signal.aborted, true);
+  assert.equal(task.body.task.status, 'cancelled');
+  const history = await request(base, `/api/v1/sessions/${sessionId}/messages`);
+  assert.equal(history.body.messages[1].source, 'cancelled');
+});
+
+test('task retention preserves active task records when terminal history grows', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'state.json');
+  const { server, base, store } = await startServer(path);
+  t.after(() => stopServer(server));
+
+  store.update((state) => {
+    state.tasks.push({
+      id: '00000000-0000-4000-8000-000000000001',
+      agent: 'astyria',
+      kind: 'chat',
+      status: 'running',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      result: null,
+      error: null,
+    });
+    for (let index = 1; index <= 105; index += 1) {
+      state.tasks.push({
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+        agent: 'astyria',
+        kind: 'chat',
+        status: 'completed',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        result: 'finished',
+        error: null,
+      });
+    }
+  });
+  const terminal = await request(base, '/api/v1/terminal', {
+    method: 'POST',
+    body: { command: 'pwd' },
+  });
+  assert.equal(terminal.status, 200);
+
+  const preserved = await request(
+    base,
+    '/api/v1/tasks/00000000-0000-4000-8000-000000000001',
+  );
+  assert.equal(preserved.body.task.status, 'running');
+});
+
+test('queued streamed chat can be authorized and cancelled before model execution', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'state.json');
+  const model = new DelayedModel();
+  const { server, base } = await startServer(path, model);
+  t.after(() => stopServer(server));
+
+  const firstResponse = await fetch(`${base}/api/v1/chat/stream`, {
+    method: 'POST',
+    headers: { Authorization: authorization, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'First request', agent: 'astyria' }),
+  });
+  const firstReader = firstResponse.body.getReader();
+  const firstMetadata = new TextDecoder().decode((await firstReader.read()).value);
+  const { session_id: sessionId } = JSON.parse(firstMetadata.match(/data: (.+)/)[1]);
+  await model.started;
+
+  const queuedResponse = await fetch(`${base}/api/v1/chat/stream`, {
+    method: 'POST',
+    headers: { Authorization: authorization, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: 'Second request, cancelled while queued',
+      agent: 'astyria',
+      session_id: sessionId,
+    }),
+  });
+  const queuedReader = queuedResponse.body.getReader();
+  const queuedMetadata = new TextDecoder().decode((await queuedReader.read()).value);
+  const { task_id: queuedTaskId } = JSON.parse(queuedMetadata.match(/data: (.+)/)[1]);
+  assert.match(queuedMetadata, /event: meta/);
+  assert.equal(model.calls, 1);
+  const cancellation = await request(base, `/api/v1/tasks/${queuedTaskId}/cancel`, {
+    method: 'POST',
+  });
+  assert.equal(cancellation.status, 202);
+  assert.equal(cancellation.body.task.status, 'cancel_requested');
+
+  model.release();
+  while (true) {
+    const { done } = await firstReader.read();
+    if (done) break;
+  }
+  let queuedEvents = '';
+  while (true) {
+    const { done, value } = await queuedReader.read();
+    if (done) break;
+    queuedEvents += new TextDecoder().decode(value);
+  }
+  assert.match(queuedEvents, /event: cancelled/);
+  const tasks = await request(base, '/api/v1/tasks');
+  assert.equal(model.calls, 1);
+  assert.deepEqual(
+    tasks.body.tasks.map(({ status }) => status).sort(),
+    ['cancelled', 'completed'],
+  );
+  const queuedTask = await request(base, `/api/v1/tasks/${queuedTaskId}`);
+  assert.equal(queuedTask.body.task.error, 'request_cancelled');
+  const history = await request(base, `/api/v1/sessions/${sessionId}/messages`);
+  assert.equal(history.body.messages.at(-1).source, 'cancelled');
 });
 
 test('API v1 streaming emits the documented session and task events', async (t) => {
