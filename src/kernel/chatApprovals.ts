@@ -1,3 +1,5 @@
+import { cleanAgentReplyText, extractAgentCommands } from './agentCommands.ts';
+
 export type ChatApprovalAction =
   | { type: 'create-app'; id: string; appType: string }
   | { type: 'create-db'; id: string }
@@ -102,4 +104,27 @@ export function parseChatApprovalCommand(message: string): ChatApprovalCommand |
   return invalid(
     'Dozwolone propozycje: create-app <id> [typ], create-db <id>, write-file <id-aplikacji> <plik> + treść w następnej linii, launch <id>.',
   );
+}
+
+export function extractAgentChatApprovals(replyText: string): ChatApprovalAction[] {
+  const cleaned = cleanAgentReplyText(replyText);
+  const writeFileMatch = cleaned.match(/\/\s*propose\s+write-file\s+(\S+)\s+(\S+)\s*\n([\s\S]+)$/);
+  const commands = extractAgentCommands(replyText).filter((command) =>
+    !writeFileMatch || !command.startsWith('/propose write-file '),
+  );
+  if (writeFileMatch) {
+    commands.unshift(`/propose write-file ${writeFileMatch[1]} ${writeFileMatch[2]}\n${writeFileMatch[3]}`);
+  }
+
+  const actions: ChatApprovalAction[] = [];
+  const seen = new Set<string>();
+  for (const command of commands) {
+    const parsed = parseChatApprovalCommand(command);
+    if (parsed?.type !== 'propose') continue;
+    const key = JSON.stringify(parsed.action);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    actions.push(parsed.action);
+  }
+  return actions;
 }

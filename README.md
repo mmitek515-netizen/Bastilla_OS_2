@@ -15,8 +15,10 @@ npm run verify
 npm run dev
 ```
 
-Interfejs: `http://localhost:3000`. Ustaw własne integracje według `.env.example`.
-Port Codespaces pozostaw prywatny do zakończenia audytu uwierzytelniania.
+Interfejs: `http://localhost:3000`. Serwer domyślnie nasłuchuje wyłącznie na
+`127.0.0.1`; ustaw `HOST` tylko za świadomie skonfigurowanym, uwierzytelnionym
+proxy. Ustaw własne integracje według `.env.example`. Port Codespaces pozostaw
+prywatny do zakończenia audytu uwierzytelniania.
 
 - [Zasady agentów](AGENTS.md)
 - [Podział pracy i nazewnictwo](docs/DEVELOPMENT.md)

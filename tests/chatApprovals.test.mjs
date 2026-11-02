@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseChatApprovalCommand } from '../src/kernel/chatApprovals.ts';
+import { extractAgentChatApprovals, parseChatApprovalCommand } from '../src/kernel/chatApprovals.ts';
 
 test('parses bounded project, database, preview and file proposals', () => {
   assert.deepEqual(parseChatApprovalCommand('/propose create-app my-project node-api'), {
@@ -36,4 +36,22 @@ test('rejects unsafe paths, protected manifests, unsupported actions and oversiz
   assert.equal(parseChatApprovalCommand('/propose run whoami').type, 'invalid');
   assert.equal(parseChatApprovalCommand('/approve not-a-uuid').type, 'invalid');
   assert.equal(parseChatApprovalCommand('hello Alex'), null);
+});
+
+test('agent proposals are extracted for approval, while shell commands are never treated as approvals', () => {
+  assert.deepEqual(
+    extractAgentChatApprovals([
+      '/propose create-app assistant-draft',
+      '/exec touch /tmp/should-not-run',
+      '!touch /tmp/should-not-run-either',
+    ].join('\n')),
+    [{ type: 'create-app', id: 'assistant-draft', appType: 'html5-web' }],
+  );
+});
+
+test('agent file proposals retain their content for operator review', () => {
+  assert.deepEqual(
+    extractAgentChatApprovals('/propose write-file demo index.html\n<h1>Draft</h1>\n'),
+    [{ type: 'write-file', appId: 'demo', filename: 'index.html', content: '<h1>Draft</h1>\n' }],
+  );
 });
