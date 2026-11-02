@@ -1,4 +1,5 @@
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { registerGptActions } from './src/lib/gptActions.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
@@ -71,7 +72,6 @@ import {
   isChatOperatorTokenConfigured,
   requiresChatOperatorAuthorization,
 } from './src/lib/chatAuthorization.mjs';
-import { createRequestRateLimit } from './src/lib/requestRateLimit.mjs';
 
 dotenv.config();
 // .env.local nadpisuje .env, ale puste wartości nie kasują kluczy z sekretów Codespaces / .env.
@@ -3773,7 +3773,13 @@ async function runOllamaOptimizeMission(): Promise<{
   };
 }
 
-const astyriaMissionRateLimit = createRequestRateLimit({ limit: 5, windowMs: 60_000 });
+const astyriaMissionRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests. Try again shortly.' },
+});
 app.post('/api/astyria/mission', astyriaMissionRateLimit, async (req, res) => {
   const { action, command, silentChat, userMessage } = req.body;
   const promptText = typeof command === 'string' && command.trim()
