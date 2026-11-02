@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { registerGptActions } from './src/lib/gptActions.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
@@ -4600,34 +4601,24 @@ const MAX_PENDING_CHAT_APPROVALS = 100;
 const CHAT_OPERATOR_TOKEN = (process.env.CHAT_OPERATOR_TOKEN || '').trim();
 const CHAT_RATE_WINDOW_MS = 60_000;
 
-function createChatRateLimiter(limit: number) {
-  const windows = new Map<string, { startedAt: number; count: number }>();
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const now = Date.now();
-    for (const [address, window] of windows) {
-      if (now - window.startedAt >= CHAT_RATE_WINDOW_MS) windows.delete(address);
-    }
-    const address = req.ip || req.socket.remoteAddress || 'unknown';
-    let window = windows.get(address);
-    if (!window) {
-      if (windows.size >= 1000) {
-        return res.status(429).json({ success: false, error: 'Za dużo żądań. Spróbuj ponownie za chwilę.' });
-      }
-      window = { startedAt: now, count: 0 };
-      windows.set(address, window);
-    }
-    if (window.count >= limit) {
-      res.setHeader('Retry-After', String(Math.ceil((CHAT_RATE_WINDOW_MS - (now - window.startedAt)) / 1000)));
-      return res.status(429).json({ success: false, error: 'Limit żądań czatu został osiągnięty. Spróbuj ponownie za chwilę.' });
-    }
-    window.count += 1;
-    next();
-  };
-}
-
-const chatApprovalListRateLimit = createChatRateLimiter(60);
-const chatApprovalDecisionRateLimit = createChatRateLimiter(10);
-const chatMessageRateLimit = createChatRateLimiter(20);
+const chatApprovalListRateLimit = rateLimit({
+  windowMs: CHAT_RATE_WINDOW_MS,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const chatApprovalDecisionRateLimit = rateLimit({
+  windowMs: CHAT_RATE_WINDOW_MS,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const chatMessageRateLimit = rateLimit({
+  windowMs: CHAT_RATE_WINDOW_MS,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 function cleanExpiredChatApprovals() {
   const expiry = Date.now() - CHAT_APPROVAL_TTL_MS;
