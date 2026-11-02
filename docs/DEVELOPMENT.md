@@ -6,6 +6,11 @@ Use Node.js 24. Run `npm ci`, then `npm run dev` on port 3000.
 Configure model credentials through deployment secrets or a local `.env` based on
 `.env.example`. No model is included; unavailable providers must be reported honestly.
 Keep the Codespaces port private: the recovered backend still requires a full access-control audit.
+To review chat operations, configure a private `CHAT_OPERATOR_TOKEN` with at least 32
+random characters in deployment secrets or `.env`; enter it in the approvals panel.
+The panel keeps it only in memory for the current page. Model replies are never executed,
+and shell commands are disabled in chat. Supported natural-language write requests create
+bounded proposals that require explicit approval.
 
 `npm run verify` runs four independent checks concurrently. GitHub Actions caches npm
 downloads and cancels obsolete runs on the same branch. Automatic Git synchronization

@@ -24,11 +24,14 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [operatorToken, setOperatorToken] = useState('');
 
   const loadApprovals = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const response = await fetch('/api/chat/approvals');
+      const response = await fetch('/api/chat/approvals', {
+        headers: { Authorization: 'Bearer ' + operatorToken },
+      });
       const result = await response.json();
       if (!response.ok || result.success !== true || !Array.isArray(result.approvals)) {
         throw new Error(result.error || `Nie udało się pobrać propozycji (HTTP ${response.status}).`);
@@ -40,7 +43,7 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [operatorToken]);
 
   useEffect(() => {
     void loadApprovals();
@@ -58,7 +61,10 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
     try {
       const response = await fetch(`/api/chat/approvals/${encodeURIComponent(approval.id)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + operatorToken,
+        },
         body: JSON.stringify({ decision }),
       });
       const result = await response.json();
@@ -105,6 +111,19 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
         {error && <div role="alert" className="rounded-md border border-rose-500/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">{error}</div>}
         {notice && <div role="status" className="rounded-md border border-emerald-500/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">{notice}</div>}
 
+        <label className="flex flex-col gap-2 rounded-md border border-slate-800 bg-slate-900/60 p-4 text-xs text-slate-300 sm:flex-row sm:items-center">
+          <span className="shrink-0 font-medium">Token Operatora (CHAT_OPERATOR_TOKEN)</span>
+          <input
+            type="password"
+            autoComplete="off"
+            value={operatorToken}
+            onChange={(event) => setOperatorToken(event.target.value)}
+            aria-label="Token Operatora do zatwierdzania"
+            placeholder="Wprowadź token skonfigurowany na serwerze"
+            className="min-h-10 min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-3 text-xs text-slate-100 outline-none focus:border-cyan-500"
+          />
+        </label>
+
         {!loading && approvals.length === 0 && !error && (
           <div className="flex min-h-56 flex-col items-center justify-center border border-dashed border-slate-700/80 px-5 text-center">
             <ClipboardCheck className="h-8 w-8 text-slate-500" />
@@ -141,7 +160,7 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
               <button
                 type="button"
                 onClick={() => void decide(approval, 'reject')}
-                disabled={busyId !== null}
+                disabled={busyId !== null || !operatorToken}
                 className="inline-flex min-h-10 items-center gap-2 rounded-md border border-rose-500/30 px-3 text-xs font-semibold text-rose-200 transition hover:bg-rose-950/50 disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
@@ -150,7 +169,7 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
               <button
                 type="button"
                 onClick={() => void decide(approval, 'approve')}
-                disabled={busyId !== null}
+                disabled={busyId !== null || !operatorToken}
                 className="inline-flex min-h-10 items-center gap-2 rounded-md border border-emerald-400/35 bg-emerald-950/35 px-3 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-900/50 disabled:opacity-50"
               >
                 <Check className="h-4 w-4" />
