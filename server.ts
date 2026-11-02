@@ -5,7 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import dotenv from 'dotenv';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
@@ -83,6 +83,74 @@ const terminalCommandEnv: NodeJS.ProcessEnv = {
   ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
   ...(process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {}),
 };
+const terminalRequestLimits = new Map<string, { count: number; resetAt: number }>();
+function limitTerminalRequests(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) {
+  const now = Date.now();
+  const client = req.socket.remoteAddress || 'unknown';
+  let limit = terminalRequestLimits.get(client);
+  if (!limit || limit.resetAt <= now) {
+    limit = { count: 0, resetAt: now + 60_000 };
+    terminalRequestLimits.set(client, limit);
+  }
+  if (limit.count >= 30) {
+    res.set('Retry-After', String(Math.ceil((limit.resetAt - now) / 1000)));
+    return res.status(429).json({ success: false, error: 'Za dużo żądań terminala. Spróbuj ponownie za chwilę.' });
+  }
+  limit.count += 1;
+  if (terminalRequestLimits.size > 1024) {
+    for (const [address, entry] of terminalRequestLimits) {
+      if (entry.resetAt <= now) terminalRequestLimits.delete(address);
+    }
+  }
+  return next();
+}
+function executeTerminalCommand(command: string, cwd?: string): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('/bin/sh', [], {
+      cwd,
+      env: terminalCommandEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let outputBytes = 0;
+    let outputLimitExceeded = false;
+    let timedOut = false;
+    const collect = (target: Buffer[], chunk: Buffer) => {
+      outputBytes += chunk.length;
+      if (outputBytes > 1024 * 1024) {
+        outputLimitExceeded = true;
+        child.kill('SIGKILL');
+        return;
+      }
+      target.push(chunk);
+    };
+    child.stdout.on('data', (chunk: Buffer) => collect(stdout, chunk));
+    child.stderr.on('data', (chunk: Buffer) => collect(stderr, chunk));
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 10_000);
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timeout);
+      const stdoutText = Buffer.concat(stdout).toString();
+      const stderrText = Buffer.concat(stderr).toString();
+      if (timedOut) return reject(new Error('Polecenie przekroczyło limit czasu.'));
+      if (outputLimitExceeded) return reject(new Error('Wynik polecenia przekroczył limit rozmiaru.'));
+      if (code !== 0) return reject(new Error(stderrText.trim() || `Polecenie zakończyło się kodem ${code ?? signal}.`));
+      return resolve({ stdout: stdoutText, stderr: stderrText });
+    });
+    child.stdin.end(command);
+  });
+}
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite').trim();
 const GEMINI_FALLBACK_MODELS = process.env.GEMINI_FALLBACK_MODELS || 'gemini-3.8-flash,gemini-flash-latest,gemini-3.7-flash';
@@ -2152,7 +2220,7 @@ app.delete('/api/apps/:id', (req, res) => {
 });
 
 // 8. POST /api/apps/execute (and alias /api/apps/command) - Terminal Execution Engine for Applications
-app.post(['/api/apps/execute', '/api/apps/command'], async (req, res) => {
+app.post(['/api/apps/execute', '/api/apps/command'], limitTerminalRequests, async (req, res) => {
   const { command, appDir } = req.body;
 
   if (!command || typeof command !== 'string') {
@@ -2373,11 +2441,7 @@ Plik został zapisany w katalogu /exports i jest natychmiast widoczny w zakładc
           const runCwd = appDir && fs.existsSync(path.join(APPS_DIR, appDir))
             ? path.join(APPS_DIR, appDir)
             : projectRoot;
-          const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], {
-            cwd: runCwd,
-            env: terminalCommandEnv,
-            timeout: 10000,
-          });
+          const { stdout, stderr } = await executeTerminalCommand(shellCmd, runCwd);
           output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
           if (!output.trim()) output = '[Wykonano pomyślnie]';
         } catch (execErr: any) {
@@ -4094,7 +4158,7 @@ app.post('/api/terminal/save-script', async (req, res) => {
 });
 
 // 4. POST Execute Command directly on Python Kernel
-app.post('/api/kernel/command', async (req, res) => {
+app.post('/api/kernel/command', limitTerminalRequests, async (req, res) => {
   const { command } = req.body;
   if (!command || typeof command !== 'string') {
     return res.status(400).json({ error: 'Brak komendy' });
@@ -4173,10 +4237,7 @@ Możliwości Root:      EXEC_SHELL, MODIFY_CONFIG, MODIFY_FILES, HOT_PATCH_UI, D
           output = 'Użycie: root exec <komenda_powłoki>';
         } else {
           try {
-            const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], {
-              env: terminalCommandEnv,
-              timeout: 10000,
-            });
+            const { stdout, stderr } = await executeTerminalCommand(shellCmd);
             output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
             if (!output.trim()) output = '[Polecenie wykonane bez wyjścia tekstowego]';
           } catch (execErr: any) {
@@ -4221,10 +4282,7 @@ Możliwości Root:      EXEC_SHELL, MODIFY_CONFIG, MODIFY_FILES, HOT_PATCH_UI, D
         output = 'Użycie: exec <komenda>';
       } else {
         try {
-          const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], {
-            env: terminalCommandEnv,
-            timeout: 10000,
-          });
+          const { stdout, stderr } = await executeTerminalCommand(shellCmd);
           output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
           if (!output.trim()) output = '[Wykonano]';
         } catch (execErr: any) {
@@ -6645,4 +6703,3 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-

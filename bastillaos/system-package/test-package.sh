@@ -206,6 +206,16 @@ node -e "
   if (!terminalResponse.ok || terminal.output !== 'BASTILLAOS_TEST_SECRET=') {
     throw new Error('terminal command inherited the server API secret');
   }
+  for (let index = 0; index < 30; index++) {
+    const response = await fetch(baseUrl + '/api/kernel/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'rate_limit_probe' }),
+    });
+    if (response.status !== (index === 29 ? 429 : 200)) {
+      throw new Error('terminal request rate limit did not enforce its per-minute quota');
+    }
+  }
 
   for (const route of ['/api/kernel/agent', '/api/terminal/generate-script']) {
     const response = await fetch(baseUrl + route, {
