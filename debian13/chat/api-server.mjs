@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
-import { mkdirSync, readdirSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { homedir, platform } from 'node:os';
+import { mkdirSync, readdirSync, lstatSync, readFileSync, realpathSync, statfsSync } from 'node:fs';
+import { cpus, freemem, homedir, loadavg, platform, release, totalmem, uptime } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ApprovalQueue, ApprovalQueueError } from './approval-queue.mjs';
@@ -109,7 +109,41 @@ function operatingSystemRuntime() {
   return {
     platform: platform(),
     distribution: releaseInfo.PRETTY_NAME || 'nieznana',
+    kernel: release(),
     debian_13_boot_verified: releaseInfo.ID === 'debian' && releaseInfo.VERSION_ID === '13',
+  };
+}
+
+function collectDiagnostics(workspace) {
+  const filesystem = (() => {
+    try {
+      const stats = statfsSync(workspace);
+      return {
+        status: 'available',
+        total_bytes: stats.blocks * stats.bsize,
+        available_bytes: stats.bavail * stats.bsize,
+      };
+    } catch {
+      return { status: 'unavailable' };
+    }
+  })();
+
+  return {
+    generated_at: now(),
+    runtime: {
+      platform: platform(),
+      architecture: process.arch,
+      kernel: release(),
+      uptime_seconds: Math.floor(uptime()),
+      process_uptime_seconds: Math.floor(process.uptime()),
+    },
+    resources: {
+      cpu_count: cpus().length,
+      load_average_1m: loadavg()[0],
+      memory_total_bytes: totalmem(),
+      memory_available_bytes: freemem(),
+      workspace_filesystem: filesystem,
+    },
   };
 }
 
@@ -496,6 +530,7 @@ export function createApiServer({
             api_version: API_VERSION,
             application: { status: 'running', product: 'Debian 13 chat' },
             operating_system: { target: 'Debian 13', runtime: operatingSystemRuntime() },
+            diagnostics: collectDiagnostics(workspaceRoot),
             model: currentModelStatus,
             task_state: 'persistent; local JSON state',
             agents: apiAgents(),

@@ -41,6 +41,14 @@ returns durable proposal/decision events. These approval routes are extensions
 not defined in the PR #97 API v1 contract; confirm their names and schemas in
 issue #93 before treating them as shared API.
 
+The authenticated `/api/v1/status` response also includes a read-only
+`diagnostics` snapshot: host runtime/platform, uptime, CPU count/load, memory,
+and free/total bytes for the private workspace filesystem. These are measurements
+of the host running the API, not proof of a Debian 13 boot, service health,
+process inventory, or logs. Filesystem metrics report `unavailable` if the host
+cannot provide them. This diagnostics field is an additive prototype extension;
+coordinate its shared schema before integrating another client.
+
 The API persists bounded sessions, proposals, decisions, tasks, and audit
 events to a local JSON file (default:
 `~/.local/state/debian13-chat/state.json`; override with

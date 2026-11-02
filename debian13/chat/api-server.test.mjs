@@ -315,6 +315,18 @@ test('v1 status and terminal retain the documented safe, read-only contract', as
   assert.equal(status.body.api_version, 'v1');
   assert.equal(status.body.operating_system.runtime.debian_13_boot_verified, false);
   assert.equal(status.body.agents[0].worker, 'not_running');
+  assert.equal(status.body.diagnostics.runtime.platform.length > 0, true);
+  assert.equal(Number.isInteger(status.body.diagnostics.resources.cpu_count), true);
+  assert.ok(status.body.diagnostics.resources.cpu_count > 0);
+  assert.ok(status.body.diagnostics.resources.memory_total_bytes > 0);
+  assert.ok(status.body.diagnostics.resources.memory_available_bytes >= 0);
+  assert.ok(status.body.diagnostics.runtime.uptime_seconds > 0);
+  assert.equal(status.body.diagnostics.resources.workspace_filesystem.status, 'available');
+  assert.ok(status.body.diagnostics.resources.workspace_filesystem.total_bytes > 0);
+  assert.ok(
+    status.body.diagnostics.resources.workspace_filesystem.available_bytes <=
+      status.body.diagnostics.resources.workspace_filesystem.total_bytes,
+  );
 
   const terminal = await request(base, '/api/v1/terminal', {
     method: 'POST',
