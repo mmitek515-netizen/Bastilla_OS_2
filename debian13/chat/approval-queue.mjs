@@ -71,6 +71,7 @@ export class ApprovalQueue {
     const item = {
       id,
       operation: validatedOperation,
+      risk: 'high',
       status: 'pending_approval',
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + this.#ttlMs).toISOString(),
