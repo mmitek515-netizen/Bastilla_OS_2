@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Debian 13 · System demo</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/app.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">NOWY SYSTEM · DEMO UŻYTKOWE</p>
+        <h1>Debian 13</h1>
+      </div>
+      <div id="system-status" class="status" role="status" aria-live="polite">Ładowanie statusu…</div>
+    </header>
+    <main>
+      <section class="card overview" aria-labelledby="runtime-title">
+        <div>
+          <h2 id="runtime-title">Środowisko i model</h2>
+          <p id="runtime-details">Pobieranie rzeczywistego statusu aplikacji i modelu.</p>
+        </div>
+        <p id="os-details" class="muted"></p>
+      </section>
+      <section class="card" aria-labelledby="agents-title">
+        <h2 id="agents-title">Profile agentów</h2>
+        <ul id="agents" class="agents"></ul>
+      </section>
+      <div class="columns">
+        <section class="card" aria-labelledby="chat-title">
+          <h2 id="chat-title">Czat</h2>
+          <form id="chat-form">
+            <label for="agent">Profil</label>
+            <select id="agent" name="agent">
+              <option value="aria">Aria · interfejs i dostępność</option>
+              <option value="astyria">Astyria · intencje i operacje</option>
+              <option value="aurelius">Aurelius · bezpieczeństwo i testy</option>
+              <option value="alex">Alex · architektura i integracja</option>
+            </select>
+            <label for="message">Wiadomość</label>
+            <textarea id="message" name="message" rows="4" maxlength="12000" required></textarea>
+            <button type="submit">Wyślij</button>
+          </form>
+          <p id="chat-result" class="result" role="status" aria-live="polite">Wynik czatu pojawi się tutaj.</p>
+        </section>
+        <section class="card" aria-labelledby="terminal-title">
+          <h2 id="terminal-title">Terminal ograniczony</h2>
+          <p class="muted">Tylko odczyt: <code>pwd</code>, <code>ls</code>, <code>cat plik</code> w workspace.</p>
+          <form id="terminal-form">
+            <label for="command">Polecenie</label>
+            <input id="command" name="command" autocomplete="off" placeholder="ls" required>
+            <button type="submit">Uruchom</button>
+          </form>
+          <pre id="terminal-result" class="result" role="status" aria-live="polite">Brak poleceń.</pre>
+        </section>
+      </div>
+      <section class="card" aria-labelledby="tasks-title">
+        <div class="section-heading">
+          <h2 id="tasks-title">Ostatnie zadania</h2>
+          <button id="refresh-tasks" class="secondary" type="button">Odśwież</button>
+        </div>
+        <ul id="tasks" class="tasks"><li>Ładowanie…</li></ul>
+      </section>
+      <p class="notice">Profile nie oznaczają działających agentów. Brak modelu oznacza brak odpowiedzi AI. To nie jest zweryfikowany boot Debiana 13.</p>
+    </main>
+  </body>
+</html>
