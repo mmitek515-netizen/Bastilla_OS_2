@@ -17,6 +17,8 @@ npm run dev
 
 Interfejs: `http://localhost:3000`. Ustaw własne integracje według `.env.example`.
 Port Codespaces pozostaw prywatny do zakończenia audytu uwierzytelniania.
+Pulpit udostępnia czat, terminal, ustawienia i skróty do modułów; status usług
+pochodzi z API. Skonfigurowany profil Gemini nie oznacza działającego modelu ani VM.
 
 - [Zasady agentów](AGENTS.md)
 - [Podział pracy i nazewnictwo](docs/DEVELOPMENT.md)

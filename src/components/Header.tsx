@@ -79,18 +79,17 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_10px_#10b981]" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-400" />
             </span>
             <span             className="bg-gradient-to-r from-blue-100 via-cyan-200 to-blue-300 bg-clip-text font-mono text-sm font-extrabold tracking-[0.16em] text-transparent">
-            BASTILLA OS
+            BASTILLA OS 2
             </span>
             <span title={formattedVersion} className="max-w-36 truncate rounded border border-blue-200/15 bg-blue-950/50 px-2 py-0.5 font-mono text-[10px] font-bold text-blue-100/75 sm:max-w-none">
               {formattedVersion}
             </span>
-            <span className="hidden items-center gap-1 rounded border border-emerald-400/15 bg-emerald-950/30 px-2 py-0.5 font-mono text-[9px] text-emerald-300 lg:inline-flex">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            DEBIAN · SVL READY
+            <span className="hidden items-center gap-1 rounded border border-cyan-400/15 bg-cyan-950/30 px-2 py-0.5 font-mono text-[9px] text-cyan-300 lg:inline-flex">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            WEB UI · CEL: DEBIAN 13
             </span>
           </div>
 
@@ -116,15 +115,12 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
             </div>
           )}
 
-          {/* Commander Alex Badge */}
-          <div className="hidden items-center gap-1.5 bg-emerald-950/80 border border-emerald-500/50 px-2.5 py-1 rounded text-emerald-300 font-bold shadow-[0_0_10px_rgba(16,185,129,0.25)] sm:flex">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>INFRA: DOWÓDCA ALEX</span>
+          <div className="hidden items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2.5 py-1 rounded text-slate-300 font-bold sm:flex">
+            <span>ROLA INFRA: ALEX</span>
           </div>
 
           <div className="hidden xl:flex items-center gap-1.5 bg-cyan-950/70 border border-cyan-500/40 px-2 py-1 rounded text-cyan-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-            <span>ASTYRIA AUTO-REPAIR: ON</span>
+            <span>MODUŁ: ASTYRIA</span>
           </div>
 
           <div className="hidden items-center gap-1.5 bg-slate-900/80 border border-slate-700/60 px-2.5 py-1 rounded backdrop-blur md:flex">
@@ -244,4 +240,3 @@ export const Header: React.FC<HeaderProps> = ({ dataStore, onReset, onShowReport
     </header>
   );
 };
-

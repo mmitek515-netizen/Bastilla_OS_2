@@ -52,6 +52,7 @@ interface BastillaStatus {
   continuousMission: boolean | null;
   geminiVm: GeminiVmStatus | null;
   error: string | null;
+  loading: boolean;
 }
 
 const featureLaunchers: Array<{
@@ -67,7 +68,7 @@ const featureLaunchers: Array<{
   { id: 'apps', title: 'Studio aplikacji', description: 'Instaluj, uruchamiaj i podglądaj aplikacje', icon: LayoutGrid },
   { id: 'hyper_com', title: 'HyperCom', description: 'Lokalny rejestr transmisji Astra_1', icon: Radio },
   { id: 'file_explorer', title: 'Pliki i eksporty', description: 'Eksplorator RING-0 i przechowywanie', icon: FolderOpen },
-  { id: 'datastore', title: 'DATA_STORE', description: 'Dane systemowe i konfiguracja', icon: Database },
+  { id: 'datastore', title: 'Ustawienia systemu', description: 'Dane systemowe i konfiguracja', icon: Database },
   { id: 'temporal', title: 'Chronolit', description: 'Historia zmian i migawki', icon: Clock3 },
   { id: 'diagnostics', title: 'Telemetria', description: 'Diagnostyka i pomiary środowiska', icon: Activity },
   { id: 'visualizer', title: 'Wizualizacje 3D', description: 'Wizualizator Triady', icon: Orbit },
@@ -99,6 +100,7 @@ export const BastillaDashboard: React.FC<BastillaDashboardProps> = ({
     continuousMission: null,
     geminiVm: null,
     error: null,
+    loading: true,
   });
 
   useEffect(() => {
@@ -128,13 +130,20 @@ export const BastillaDashboard: React.FC<BastillaDashboardProps> = ({
             : null,
           geminiVm: geminiVm as GeminiVmStatus,
           error: null,
+          loading: false,
         });
       } catch (error) {
         if (!active) return;
-        setStatus((previous) => ({
-          ...previous,
-          error: error instanceof Error ? error.message : String(error),
-        }));
+        setStatus({
+          systemVersion: '—',
+          appCount: null,
+          continuousMission: null,
+          geminiVm: null,
+          error: error instanceof Error && /^Status API: HTTP \d+$/.test(error.message)
+            ? error.message
+            : 'Nie udało się pobrać statusu usług z API.',
+          loading: false,
+        });
       }
     };
 
@@ -217,16 +226,53 @@ export const BastillaDashboard: React.FC<BastillaDashboardProps> = ({
   const recentMessages = dataStore.chat_history;
 
   return (
-    <section className="cyber-grid flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#050b18] p-2 text-slate-100 sm:p-3">
-      <div className="flex h-full min-h-0 w-full flex-col gap-2">
+    <section className="cyber-grid flex min-h-[70dvh] min-w-0 flex-1 flex-col overflow-visible bg-[#050b18] p-2 text-slate-100 sm:p-3">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-3">
         <header className="flex shrink-0 items-center justify-between gap-2 rounded-xl border border-cyan-400/20 bg-[#081326] px-3 py-2">
-          <span className="flex items-center gap-2 text-xs font-bold text-cyan-100"><MessagesSquare className="h-4 w-4" /> BASTILLAOS · CZAT</span>
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 text-sm font-bold text-cyan-100"><MessagesSquare className="h-4 w-4 shrink-0" /> Bastilla OS 2</h1>
+            <p className="mt-1 text-[10px] text-slate-400">Pulpit aplikacji · interfejs webowy dla systemu Debian 13</p>
+          </div>
           <button type="button" onClick={() => onNavigate('terminal')} className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-950/50 px-3 py-2 text-xs font-bold text-cyan-100">
             <Terminal className="h-4 w-4" /> Pełny terminal
           </button>
         </header>
-        <div className="grid min-h-0 flex-1 gap-2">
-          <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-blue-300/20 bg-[#081326]/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
+        <section aria-label="Status usług" className="grid shrink-0 grid-cols-2 gap-2 xl:grid-cols-4">
+          <article className="min-w-0 rounded-xl border border-blue-300/15 bg-[#081326] p-3">
+            <h2 className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">API systemu</h2>
+            <p className={`mt-1 truncate text-sm font-bold ${status.error ? 'text-amber-200' : status.loading ? 'text-slate-300' : 'text-emerald-200'}`}>
+              {status.loading ? 'Sprawdzanie…' : status.error ? 'Brak pełnych danych' : 'Odpowiada'}
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500">
+              {status.error || (status.loading ? 'Oczekiwanie na odpowiedź API' : `Jądro: ${status.systemVersion}`)}
+            </p>
+          </article>
+          <article className="min-w-0 rounded-xl border border-blue-300/15 bg-[#081326] p-3">
+            <h2 className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Aplikacje</h2>
+            <p className="mt-1 text-sm font-bold text-cyan-100">{status.appCount === null ? '—' : status.appCount}</p>
+            <p className="mt-1 text-[10px] text-slate-500">{status.appCount === null ? 'Oczekiwanie na dane API' : 'Liczba zarejestrowanych aplikacji'}</p>
+          </article>
+          <article className="min-w-0 rounded-xl border border-blue-300/15 bg-[#081326] p-3">
+            <h2 className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Misja ciągła</h2>
+            <p className="mt-1 text-sm font-bold text-cyan-100">
+              {status.continuousMission === null ? 'Nieznany' : status.continuousMission ? 'Włączona' : 'Wyłączona'}
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500">Stan odczytany z API misji</p>
+          </article>
+          <article className="min-w-0 rounded-xl border border-blue-300/15 bg-[#081326] p-3">
+            <h2 className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Profil Gemini</h2>
+            <p className="mt-1 truncate text-sm font-bold text-cyan-100">
+              {!status.geminiVm
+                ? status.loading ? 'Sprawdzanie…' : 'Nieznany'
+                : !status.geminiVm.configured
+                ? 'Brak klucza API'
+                : status.geminiVm.modelNameValid ? 'Skonfigurowany' : 'Nieprawidłowy model'}
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500">Profil zdalny; nie potwierdza działania modelu</p>
+          </article>
+        </section>
+        <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]">
+          <section className="flex min-h-[30rem] min-w-0 flex-col overflow-hidden rounded-2xl border border-blue-300/20 bg-[#081326]/95 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
             <div className="flex items-center justify-between border-b border-blue-200/10 px-4 py-3">
               <div className="flex items-center gap-2 text-xs font-bold text-blue-50">
                 <MessagesSquare className="h-4 w-4 text-cyan-300" /> CZAT AGENTÓW
@@ -352,9 +398,27 @@ export const BastillaDashboard: React.FC<BastillaDashboardProps> = ({
               <p className="mt-1 px-1 text-[9px] text-slate-500">Maks. 10 plików; tekst 5 MB/plik i 20 MB łącznie, DOCX 20 MB (10 MB po rozpakowaniu), PDF/JPG 20 MB/plik i 40 MB łącznie.</p>
             </form>
           </section>
+          <aside aria-labelledby="quick-launch-title" className="min-w-0 rounded-2xl border border-blue-300/15 bg-[#081326]/90 p-3">
+            <h2 id="quick-launch-title" className="mb-3 text-xs font-bold uppercase tracking-wide text-cyan-100">Szybki dostęp</h2>
+            <div className="grid grid-cols-2 gap-2 xl:max-h-[34rem] xl:grid-cols-1 xl:overflow-y-auto">
+              {featureLaunchers.map(({ id, title, description, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onNavigate(id)}
+                  className="group flex min-w-0 items-start gap-2 rounded-xl border border-slate-700/70 bg-slate-950/60 p-2.5 text-left transition hover:border-cyan-400/40 hover:bg-cyan-950/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
+                >
+                  <Icon aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[11px] font-semibold text-slate-100 group-hover:text-cyan-100">{title}</span>
+                    <span className="mt-1 block text-[10px] leading-snug text-slate-500">{description}</span>
+                  </span>
+                  <ArrowUpRight aria-hidden="true" className="ml-auto h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-cyan-200" />
+                </button>
+              ))}
+            </div>
+          </aside>
         </div>
-
-
       </div>
     </section>
   );
