@@ -96,6 +96,27 @@ The service token is a server-to-server credential: never put it in browser
 storage, HTML, JavaScript, or a request URL. For a service on another host,
 place both services behind a trusted HTTPS network boundary.
 
+## Run in the Debian 13 Codespace
+
+The merged PR #108 profile opens `/workspaces/<repository>/debian13`, forwards
+port 3000 privately, and does not start an application automatically. In a
+Codespace whose checkout contains this PR's demo files, run from that directory:
+
+```sh
+pwd
+python3 --version
+python3 -m unittest discover -s tests -v
+python3 smoke_test.py
+python3 browser_e2e.py
+DEBIAN13_PORT=3000 python3 server.py
+```
+
+Open the private port 3000 from the Codespaces Ports panel. The browser test
+requires Chromium or Chrome to be installed; it does not install a browser.
+There is no `debian13/package-lock.json`, so the profile correctly skips `npm
+ci`. Stop the server with Ctrl-C. Opening the profile alone proves neither that
+the Codespace finished provisioning nor that the app, model, or agents started.
+
 ## Tests and isolated CI
 
 ```sh
@@ -121,8 +142,8 @@ of one API yet.
 | Mission | Current interface in that PR | Compatibility with this v1 | Required integration |
 | --- | --- | --- | --- |
 | Aria UI · PR #94 (`591d38d`) | `debian13/ui` proxies fixed `/api/v1` status, agents, tasks, events, chat/SSE, sessions, and terminal routes over loopback. | **Chat compatible:** request fields, SSE names, sessions, and terminal path match. Its proxy does not allow operation queue routes or inject operator credentials. | Extend only the reviewed operation allowlist. Keep tokens out of browser code and preserve bounded proxy bodies. |
-| Astyria chat · PR #95 (`0245ea4`) | `debian13/chat` implements the v1 chat/session/SSE schema plus `/api/v1/operations`, `/operations/audit`, and `/operations/{id}/decision`; all routes currently require an operator ****** | **Partial match:** route/request shapes mostly match; all-route auth conflicts with the loopback UI proxy and current gateway. Errors are structured `{error:{code}}`. | Agree per-route auth and normalize error responses before integration. Keep decisions queue-only; do not copy this separate server. |
-| Aurelius runtime · PR #96 (`ad51d55`) | `debian13/system` provides `/healthz`, `/v1/profiles`, `/v1/diagnostics`, `/v1/chat`, and `/v1/terminal`; all except liveness require a bearer token. | **Adapter compatible for chat/status:** service request and response fields differ from the browser v1 schema; system errors are nested objects. It has no chat sessions or SSE endpoint. | Use the server-side fixed-route adapter, normalize errors, and keep the service token out of the browser. Do not treat its terminal allowlist as the gateway's current terminal contract. |
+| Astyria chat · PR #95 (`ee9a276`) | `debian13/chat` implements the v1 chat/session/SSE schema plus `/api/v1/operations`, `/operations/audit`, and `/operations/{id}/decision`; all routes currently require operator bearer authorization. | **Partial match:** route/request shapes mostly match; all-route auth conflicts with the loopback UI proxy and current gateway. Errors are structured `{error:{code}}`. | Agree how the server-side proxy supplies authorization and normalize errors before integration. Keep decisions queue-only; do not copy this separate server. |
+| Aurelius runtime · PR #96 (`fc2c15e`) | `debian13/system` provides `/healthz`, `/v1/profiles`, `/v1/diagnostics`, `/v1/chat`, and `/v1/terminal`; all except liveness require a bearer token. | **Adapter compatible for chat/status:** service request and response fields differ from the browser v1 schema; system errors are nested objects. It has no chat sessions or SSE endpoint. | Use the server-side fixed-route adapter, normalize errors, and keep the service token out of the browser. Do not treat its terminal allowlist as the gateway's current terminal contract. |
 | Alex integration · PR #97 (this branch) | `/api/v1/status`, `/agents`, `/tasks`, `/events`, `/sessions/{id}/messages`, `/chat`, `/chat/stream`, `/terminal`; now includes an optional server-side adapter for #96 chat. | **Contract owner/reference implementation.** Loopback-only; approval routes and operator authorization are not implemented here. | Maintain the shared v1 schema and contract tests; do not claim the open draft branches are integrated. |
 
 ### Shared request, response, error, and event shapes
@@ -159,23 +180,27 @@ of one API yet.
 
 ### Integration order and current blockers
 
-1. **Current verified step:** Chromium exercises the loopback UI → `/api/v1/chat/stream` → authenticated system-service contract fixture, plus profiles, terminal, session reload/reset, and responsive layouts. The fixture is not a real service or model.
-2. **Aurelius runtime:** #96 owns `debian13/system/**`; #97 now has a fixed server-side chat adapter for its `/v1` request/response shape. Verify the actual service after the branches are reviewed together.
-3. **Astyria chat:** agree operator-only auth for the #95 queue endpoints and normalize its errors before joining its approval queue. Test that model-generated operations only queue and never execute automatically.
-4. **Aria UI:** after review of that auth boundary, extend #94's proxy for approved operation routes and run its browser UI against the combined gateway.
+1. **Browser verification:** Chromium exercises the loopback UI → `/api/v1/chat/stream` → authenticated system-service contract fixture, plus profiles, terminal, session reload/reset, and responsive layouts. The browser E2E fixture is not a real service or model.
+2. **Real service smoke:** I separately ran #96's actual `debian13/system/server.py` from head `fc2c15e` in a temporary process and connected this branch's gateway adapter over loopback HTTP. Missing bearer credentials were rejected on `/v1/profiles`, `/v1/diagnostics`, `/v1/chat`, and `/v1/terminal`; missing and invalid credentials were also checked against the protected GET endpoints. Authenticated profiles/diagnostics and the gateway status succeeded. With no model configured, chat returned 503 and no fabricated answer or token disclosure. This verifies the service protocol and server-side adapter, not model inference or the owner's Codespace.
+3. **Aurelius runtime:** #96 owns `debian13/system/**`; #97 has a fixed server-side chat adapter for its `/v1` request/response shape. Full integration still needs the reviewed service source and adapter to coexist on one branch.
+4. **Astyria chat:** #95 requires operator bearer authorization on every API route. The #97 gateway does not yet expose the approval queue, provide a server-side adapter to #95, or implement that operator-auth boundary. Agree how the UI bootstrap and proxy will authenticate before joining the queue; normalize errors and test that model-generated operations only queue.
+5. **Aria UI:** #94's proxy needs a reviewed, server-side credential path before it can call #95's all-route-auth API. Extend only its approved route allowlist and test the browser UI against the combined gateway after coordination with its owner.
 
 **Owners:** Alex owns the `/api/v1` contract, `debian13/server.py`,
 `debian13/system_service_adapter.py`, and `debian13/tests/**`; Aria owns
 `debian13/ui/**`; Astyria owns `debian13/chat/**`; Aurelius owns
 `debian13/system/**` and the isolated CI workflow. Keep one writer per file.
 
-**Blockers:** #94–#96 remain separate open draft PRs. #95 currently requires an
+**Blockers:** #94–#96 remain separate open draft PRs and are not integrated by
+this branch. PR #108 is merged and supplies only the Codespaces workspace
+profile; its actual provisioning remains unverified. #95 currently requires an
 operator token on every API route, unlike #94's proxy and this loopback gateway;
-the gateway does not yet expose approval routes. The adapter is tested against
-a local protocol fixture, not a running #96 service. No real model inference,
+the gateway does not yet expose approval routes or operator authentication.
+The adapter has now been smoke-tested against the actual #96 service process,
+but the browser E2E still uses a contract fixture. No real model inference,
 agent worker, external MCP handshake, GPT Actions connection, or Debian 13 boot
 is claimed. Check current Actions status separately; local green tests are not
-proof that an `action_required` workflow was approved or passed.
+proof that a workflow ran or passed.
 
 ### Cross-check of requests #99–#107
 
