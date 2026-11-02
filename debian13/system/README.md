@@ -43,15 +43,63 @@ confined file paths. It has a per-IP request limit and bounds execution time and
 output. Keep the port private; the bearer token is required for all API routes
 except liveness.
 
+### Codespaces Debian 13 readiness
+
+From the repository root, run these commands in one Codespaces terminal. They
+keep the generated token in the shell environment and container; do not print it
+or forward the port publicly:
+
+```sh
+export DEBIAN13_API_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+unset MODEL_CHAT_URL MODEL_API_KEY MODEL_NAME
+docker compose -f debian13/system/compose.yaml build
+docker compose -f debian13/system/compose.yaml up -d
+python3 debian13/system/readiness.py
+```
+
+The checker verifies the host's `/etc/os-release` is Debian `VERSION_ID=13`,
+health, rejection of anonymous diagnostics with HTTP 401, authenticated
+diagnostics, and whether provider settings are present. It never prints
+credentials. A missing provider blocks readiness; configured settings are not
+proof that the provider is reachable or that inference works. The checker never
+sends a model prompt. Use `docker compose -f debian13/system/compose.yaml down`
+to stop the service.
+
+### Verify the PR #97 adapter against the running service
+
+The API gateway owns `debian13/system_service_adapter.py`; this branch does not
+copy or modify that shared file. The smoke is pinned to the reviewed PR #97
+revision `4e5138fda32fe3513c3929b0c433ab42b3ea3fb0` and verifies the adapter
+file's SHA-256 before importing it. With that source available, run its actual
+implementation against the running `/v1` service:
+
+```sh
+git show 4e5138fda32fe3513c3929b0c433ab42b3ea3fb0:debian13/system_service_adapter.py > /tmp/system_service_adapter.py
+DEBIAN13_SYSTEM_API_URL=http://127.0.0.1:8080 \
+DEBIAN13_API_TOKEN="$DEBIAN13_API_TOKEN" \
+python3 debian13/system/adapter_integration_smoke.py \
+  --adapter /tmp/system_service_adapter.py
+```
+
+This smoke calls the real service's authenticated `/v1/profiles` through
+`SystemServiceAdapter`, verifies that an invalid token is treated as
+unavailable, and checks fail-closed chat only when no provider is configured.
+When a provider is configured it skips chat to avoid an unapproved request.
+The adapter integration does not itself prove a real model is reachable or
+perform real inference.
+
 ## API compatibility boundary
 
-This service exposes `/v1/profiles`, `/v1/terminal`, and `/v1/chat`, and requires
-a bearer token except for `/healthz`. Alex's separate Debian 13 demo contract in
-PR #97 uses `/api/v1/status`, `/api/v1/agents`, session/task routes, and an
-unauthenticated loopback-only listener. The two runtimes are not API-compatible:
-do not point that demo's UI at this service or expose either listener publicly
-without agreeing on a shared contract and authentication model. This service's
-terminal and model chat remain separate; model output is not executed.
+This service exposes `/v1/profiles`, `/v1/diagnostics`, `/v1/terminal`, and
+`/v1/chat`, and requires a bearer token except for `/healthz`. Alex's separate
+Debian 13 demo contract in PR #97 uses `/api/v1/status`, `/api/v1/agents`, and
+session/task routes on a loopback-only listener. Its server-side
+`SystemServiceAdapter` can call this service's authenticated `/v1/profiles` and
+`/v1/chat`; that narrow adapter does not make the service API compatible with
+the browser-facing `/api/v1` contract or provide `/v1` diagnostics, sessions,
+or streaming. Keep the token server-side and do not expose either listener
+publicly. This service's terminal and model chat remain separate; model output
+is not executed.
 
 Optional real model access uses an OpenAI-compatible chat-completions endpoint.
 Set these variables before starting Compose; the URL must be HTTPS, except that

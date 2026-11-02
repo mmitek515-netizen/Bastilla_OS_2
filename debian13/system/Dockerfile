@@ -15,7 +15,8 @@ RUN apt-get update \
     && install -d -o debian13 -g debian13 -m 0750 /workspace
 
 COPY --chown=root:root server.py /opt/debian13/system/server.py
-RUN chmod 0644 /opt/debian13/system/server.py
+COPY --chown=root:root readiness.py /opt/debian13/system/readiness.py
+RUN chmod 0644 /opt/debian13/system/server.py /opt/debian13/system/readiness.py
 
 USER 10001:10001
 EXPOSE 8080
