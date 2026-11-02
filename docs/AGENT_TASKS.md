@@ -34,8 +34,8 @@ The authenticated endpoints also include:
 - `POST /api/agent-tasks/:id/retry` to retry an eligible failed task.
 - `POST /api/agent-tasks/cancel` with `{ "id": "..." }`.
 
-Approval and retry decisions are limited to 30 requests per minute per server
-process.
+Approval and retry decisions are limited to 30 requests per minute per client
+IP in each server process.
 
 AI tasks get at most three attempts with bounded exponential delay. Other
 actions are not automatically retried. Cancellation and timeout use an abort

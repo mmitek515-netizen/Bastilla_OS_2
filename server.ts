@@ -1,4 +1,5 @@
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { registerGptActions } from './src/lib/gptActions.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
 import { GoogleGenAI } from '@google/genai';
@@ -6339,8 +6340,6 @@ app.post('/api/kernel/agent', (_req, res) => {
 
 const agentTasksToken = (process.env.BASTILLA_AGENT_TASKS_TOKEN || '').trim();
 const TASK_DECISION_WINDOW_MS = 60_000;
-let taskDecisionWindowStartedAt = 0;
-let taskDecisionRequestCount = 0;
 
 function authorizeAgentTasks(req: express.Request, res: express.Response): boolean {
   if (!agentTasksToken) {
@@ -6354,28 +6353,17 @@ function authorizeAgentTasks(req: express.Request, res: express.Response): boole
   return true;
 }
 
-function allowAgentTaskDecision(res: express.Response): boolean {
-  const now = Date.now();
-  if (now - taskDecisionWindowStartedAt >= TASK_DECISION_WINDOW_MS) {
-    taskDecisionWindowStartedAt = now;
-    taskDecisionRequestCount = 0;
-  }
-  if (taskDecisionRequestCount >= 30) {
-    res.setHeader('Retry-After', String(Math.ceil((TASK_DECISION_WINDOW_MS - (now - taskDecisionWindowStartedAt)) / 1000)));
-    res.status(429).json({ success: false, error: 'Za dużo decyzji dotyczących zadań. Spróbuj ponownie za chwilę.' });
-    return false;
-  }
-  taskDecisionRequestCount += 1;
-  return true;
-}
-
 const requireAgentTasksAuthorization: express.RequestHandler = (req, res, next) => {
   if (authorizeAgentTasks(req, res)) next();
 };
 
-const agentTaskDecisionRateLimit: express.RequestHandler = (_req, res, next) => {
-  if (allowAgentTaskDecision(res)) next();
-};
+const agentTaskDecisionRateLimit = rateLimit({
+  windowMs: TASK_DECISION_WINDOW_MS,
+  limit: 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, error: 'Za dużo decyzji dotyczących zadań. Spróbuj ponownie za chwilę.' },
+});
 
 app.get('/api/agent-tasks', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
