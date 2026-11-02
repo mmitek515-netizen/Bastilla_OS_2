@@ -195,6 +195,22 @@ test('Ollama failures and oversized provider responses fail without returning pr
   await assert.rejects(oversized.listModels(), { code: 'provider_response_too_large' });
 });
 
+test('Ollama requests abort at the configured timeout', async () => {
+  const client = new OllamaClient({
+    model: 'local-model',
+    timeoutMs: 1000,
+    fetchImpl: (_url, { signal }) => new Promise((_, reject) => {
+      const fallback = setTimeout(() => reject(new Error('timeout test fallback')), 1500);
+      signal.addEventListener('abort', () => {
+        clearTimeout(fallback);
+        reject(new Error('aborted'));
+      }, { once: true });
+    }),
+  });
+
+  await assert.rejects(client.listModels(), { code: 'provider_unavailable' });
+});
+
 test('chat messages are bounded and history is operator-authorized', async () => {
   const chat = new ChatService({
     queue: createQueue(),
