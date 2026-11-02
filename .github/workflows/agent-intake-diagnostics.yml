@@ -1,0 +1,44 @@
+name: Agent issue intake diagnostics
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Existing issue number to inspect (optional)'
+        required: false
+        type: string
+permissions:
+  contents: read
+  issues: read
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify GitHub issue event delivery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+          INPUT_ISSUE: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          number="${EVENT_ISSUE:-${INPUT_ISSUE:-}}"
+          {
+            echo '## Agent intake diagnostic'
+            echo 'This checks GitHub event delivery, not execution of an AI agent.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "$number" ]]; then
+            echo 'No issue specified (manual diagnostic only).' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ ! "$number" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'Invalid issue number' >&2
+            exit 1
+          fi
+          gh issue view "$number" --repo "$REPO" --json number,title,state,assignees \
+            --jq '{number,title,state,assignees:[.assignees[].login]}' \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          echo 'Issue event was received; no AI execution is implied.' >> "$GITHUB_STEP_SUMMARY"
