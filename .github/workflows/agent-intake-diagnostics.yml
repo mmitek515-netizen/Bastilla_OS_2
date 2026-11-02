@@ -3,6 +3,11 @@ on:
   issues:
     types: [opened, reopened]
   workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to diagnose (optional)'
+        required: false
+        type: string
 permissions:
   contents: read
   issues: read
@@ -14,12 +19,23 @@ jobs:
       - name: Report real dispatcher status
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
           REPO: ${{ github.repository }}
         run: |
           echo 'Checking GitHub issue event delivery; this is NOT an AI agent execution.'
           if [ -n "$ISSUE_NUMBER" ]; then
+            if ! [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
+              echo 'Invalid issue number; expected positive integer' >&2
+              exit 1
+            fi
             gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,state,assignees --jq '{number,title,state,assignees:[.assignees[].login]}'
           fi
           echo 'Event delivered. No verified autonomous agent runner is configured by this workflow.'
           echo 'Next: connect a real, authenticated runner with scoped permissions and auditable PR output.'
+          {
+            echo '## Agent issue intake diagnostics'
+            echo "Repository: $REPO"
+            echo "Issue: ${ISSUE_NUMBER:-manual check without issue}"
+            echo 'Event was received by Actions; this does not confirm AI execution.'
+            echo 'No agent model or task executor is invoked by this workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
