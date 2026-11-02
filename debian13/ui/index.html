@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Niezależny interfejs roboczy terminala i czatu dla nowego systemu Debian 13."
+    />
+    <title>Debian 13 · Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./app.mjs"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="Debian 13 Console — pulpit">
+          <span class="brand-mark" aria-hidden="true">D13</span>
+          <span>
+            <strong>Debian 13</strong>
+            <span class="brand-subtitle">Console · nowy system</span>
+          </span>
+        </a>
+        <div class="runtime-pill" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Runtime niepodłączony</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="intro" aria-labelledby="page-title">
+          <p class="eyebrow">ŚRODOWISKO ROBOCZE · ETAP UI</p>
+          <h1 id="page-title">Terminal i czat</h1>
+          <p>
+            Osobny interfejs nowego systemu. Wpisy są lokalnymi szkicami — bez
+            połączenia z runtime nic nie jest wysyłane ani wykonywane.
+          </p>
+        </section>
+
+        <section class="agent-panel panel" aria-labelledby="agents-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">PROFILE</p>
+              <h2 id="agents-title">Agenci</h2>
+            </div>
+            <span class="muted-count">4 profile · stan nieznany</span>
+          </div>
+          <ul id="agent-list" class="agent-grid" aria-label="Statusy profili agentów"></ul>
+        </section>
+
+        <div class="workspace-grid">
+          <section class="panel workspace-panel" aria-labelledby="chat-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">ROZMOWA</p>
+                <h2 id="chat-title">Czat agentów</h2>
+              </div>
+              <label class="agent-select-label" for="chat-agent">Profil</label>
+              <select id="chat-agent" name="agent" aria-label="Wybierz profil agenta">
+                <option value="aria">Aria</option>
+                <option value="astyria">Astyria</option>
+                <option value="aurelius">Aurelius</option>
+                <option value="alex">Alex</option>
+              </select>
+            </div>
+            <div class="transcript" aria-label="Szkic rozmowy">
+              <p class="empty-state">
+                Wybierz profil i przygotuj wiadomość. Odpowiedź pojawi się dopiero
+                po podłączeniu rzeczywistego wykonawcy.
+              </p>
+            </div>
+            <form id="chat-form" class="composer">
+              <label for="chat-message">Wiadomość</label>
+              <textarea
+                id="chat-message"
+                name="message"
+                rows="3"
+                maxlength="4000"
+                placeholder="Napisz szkic wiadomości…"
+                required
+              ></textarea>
+              <div class="form-footer">
+                <p id="chat-feedback" class="form-feedback" aria-live="polite">
+                  Wiadomość nie zostanie wysłana — brak runtime.
+                </p>
+                <button type="submit" class="button button-primary">Wyślij</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel workspace-panel terminal-panel" aria-labelledby="terminal-title">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">POLECENIA</p>
+                <h2 id="terminal-title">Terminal</h2>
+              </div>
+              <span class="local-badge">bez powłoki</span>
+            </div>
+            <div class="terminal-output" aria-label="Wynik terminala" aria-live="polite">
+              <p><span class="prompt-mark" aria-hidden="true">$</span> Runtime systemu niepodłączony.</p>
+              <p class="terminal-hint">Polecenia nie są obecnie wykonywane.</p>
+            </div>
+            <form id="terminal-form" class="composer terminal-composer">
+              <label for="terminal-command">Polecenie</label>
+              <input
+                id="terminal-command"
+                name="command"
+                type="text"
+                maxlength="1000"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Wpisz polecenie jako szkic…"
+                required
+              />
+              <div class="form-footer">
+                <p id="terminal-feedback" class="form-feedback" aria-live="polite">
+                  Brak runtime — powłoka jest niedostępna.
+                </p>
+                <button type="submit" class="button button-secondary">Uruchom</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </main>
+
+      <footer class="footer">
+        <span>Debian 13 · niezależny interfejs roboczy</span>
+        <span>Nie jest to potwierdzenie bootowania systemu.</span>
+      </footer>
+    </div>
+  </body>
+</html>
