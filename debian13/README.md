@@ -74,11 +74,36 @@ in the model name or chat prompt.
 ```sh
 python3 -m unittest discover -s debian13/tests -v
 python3 debian13/smoke_test.py
+python3 debian13/browser_e2e.py
 ```
 
 `.github/workflows/debian13-demo.yml` runs the isolated Python contract/API
-checks and browser-client syntax check when `debian13/**` or that workflow
-changes. No npm dependencies or paid services are involved.
+checks, browser-client syntax check, and Chromium browser E2E over real loopback
+HTTP when `debian13/**` or that workflow changes. Chromium/Chrome must be
+available on the runner. No npm dependencies or paid services are involved.
+
+## Shared v1 contract and compatibility matrix
+
+The canonical interface for this standalone demo is the `/api/v1` contract
+above. The following comparison is based on the open PR heads inspected on
+2026-11-02; none is merged into this branch. Their changes are not interchangeable
+implementations of one API yet.
+
+| Mission | Current interface in that PR | Compatibility with this v1 | Required integration |
+| --- | --- | --- | --- |
+| Aria UI · PR #94 (`529d724`) | UI proxy permits `GET /api/v1/status`, `/agents`, `/tasks` and `POST /api/v1/chat`, `/terminal`. Chat sends `message` + `agent`; terminal sends `command`. | **Partial match:** these paths and request fields match. Its proxy does not allow `/events`, `/sessions/{id}/messages`, or `/chat/stream`, so session history and SSE cannot work through that UI proxy yet. | Extend the fixed route allowlist and browser UI for session/history, SSE and event/task status. Preserve bounded proxy bodies and avoid putting operator credentials in browser code. |
+| Astyria chat · PR #95 (`2252357`) | Legacy Express paths include `/api/triad/message`, `/api/chat/approvals`, `/api/chat/approvals/:id`, and `/api/astyria/mission`; chat operations use an operator token and origin checks. | **Not directly compatible:** the root paths and response shapes differ; this demo has no proposal/approval endpoints. | Agree typed `/api/v1` proposal and decision routes, retain operator authorization, and add queue-only handling. Never copy or enable legacy execution routes in the new system. |
+| Aurelius runtime · PR #96 (`32f2345`) | Standalone service uses `/healthz`, `/v1/profiles`, `/v1/chat`, `/v1/terminal`; all except liveness require a bearer token. | **Not directly compatible:** API prefix, profile/chat field names, error shape, and authentication boundary differ. | Reconcile service routing with `/api/v1`; keep authorization on state-changing/proposal routes and deliver credentials only server-side, never in the browser. Confirm terminal semantics and session/streaming support before adoption. |
+| Alex integration · PR #97 (this branch) | `/api/v1/status`, `/agents`, `/tasks`, `/events`, `/sessions/{id}/messages`, `/chat`, `/chat/stream`, `/terminal`; four profile IDs; tasks/events and session state are bounded and process-local. | **Contract owner/reference implementation.** Loopback-only; no operator token or write actions exist yet. | Keep one documented v1 schema and add contract tests for every adapter before integration. |
+
+### Integration order and current blockers
+
+1. **Current verified step:** run Chromium against this branch's live loopback HTTP server; test profile loading, streaming `/help`, terminal request, session persistence on reload, and explicit session reset. This does not claim model inference.
+2. **Aurelius runtime:** review and adapt PR #96's service boundary to the v1 paths and server-side authorization contract. Do not mount an authenticated endpoint on a public port or pass a bearer token to browser JavaScript.
+3. **Astyria chat:** integrate the typed proposal queue and approval decisions only after agreeing request/response shapes and operator auth; test that model-generated operations only queue and never execute automatically.
+4. **Aria UI:** extend the UI proxy and views to consume sessions, SSE, task/events and approved proposals; run browser E2E against the combined service on desktop and narrow mobile widths.
+
+**Blockers:** PRs #94–#96 are still separate draft changes and use three different API/security shapes. The new demo is loopback-only, stores sessions in process memory, has no approval API or write operations, and depends on a real model that is currently unconfigured. Automated E2E covers the current demo, not the three unmerged branches. CI remains subject to GitHub's `action_required` gate; local green tests are reported separately and do not clear that gate.
 
 ## Shared integration boundary
 
@@ -93,6 +118,6 @@ The minimal contract keeps four modules separable:
 - **Alex/integration:** owns the versioned API and task/event response shapes.
 
 Next stages, only after review and isolated green checks: authenticated write
-proposals, automated browser E2E, Debian 13 packaging/boot verification, and
-four real agent runtimes. The current local demo does not claim any of those
-results.
+proposals, end-to-end verification of the combined Aria/Astyria/Aurelius
+modules, Debian 13 packaging/boot verification, and four real agent runtimes.
+The current local demo does not claim any of those results.

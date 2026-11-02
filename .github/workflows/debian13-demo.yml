@@ -29,3 +29,5 @@ jobs:
         run: python debian13/smoke_test.py
       - name: Browser client syntax check
         run: node --check debian13/app.js
+      - name: Browser E2E against loopback HTTP
+        run: python debian13/browser_e2e.py
