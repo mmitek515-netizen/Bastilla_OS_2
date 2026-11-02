@@ -74,7 +74,6 @@ class UiHandler(SimpleHTTPRequestHandler):
             response = connection.getresponse()
             payload = response.read(MAX_PROXY_RESPONSE_BYTES + 1)
             status = response.status
-            content_type = response.getheader("Content-Type", "application/json; charset=utf-8")
             connection.close()
         except (OSError, ValueError, http.client.HTTPException):
             self._send_error_json(502, "Runtime API Debian 13 jest niedostępne.")
@@ -84,7 +83,7 @@ class UiHandler(SimpleHTTPRequestHandler):
             self._send_error_json(502, "Odpowiedź API przekracza limit rozmiaru.")
             return
         self.send_response(status)
-        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
