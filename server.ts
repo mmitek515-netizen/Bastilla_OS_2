@@ -4598,6 +4598,36 @@ const pendingChatApprovals = new Map<string, PendingChatApproval>();
 const CHAT_APPROVAL_TTL_MS = 15 * 60 * 1000;
 const MAX_PENDING_CHAT_APPROVALS = 100;
 const CHAT_OPERATOR_TOKEN = (process.env.CHAT_OPERATOR_TOKEN || '').trim();
+const CHAT_RATE_WINDOW_MS = 60_000;
+
+function createChatRateLimiter(limit: number) {
+  const windows = new Map<string, { startedAt: number; count: number }>();
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    for (const [address, window] of windows) {
+      if (now - window.startedAt >= CHAT_RATE_WINDOW_MS) windows.delete(address);
+    }
+    const address = req.ip || req.socket.remoteAddress || 'unknown';
+    let window = windows.get(address);
+    if (!window) {
+      if (windows.size >= 1000) {
+        return res.status(429).json({ success: false, error: 'Za dużo żądań. Spróbuj ponownie za chwilę.' });
+      }
+      window = { startedAt: now, count: 0 };
+      windows.set(address, window);
+    }
+    if (window.count >= limit) {
+      res.setHeader('Retry-After', String(Math.ceil((CHAT_RATE_WINDOW_MS - (now - window.startedAt)) / 1000)));
+      return res.status(429).json({ success: false, error: 'Limit żądań czatu został osiągnięty. Spróbuj ponownie za chwilę.' });
+    }
+    window.count += 1;
+    next();
+  };
+}
+
+const chatApprovalListRateLimit = createChatRateLimiter(60);
+const chatApprovalDecisionRateLimit = createChatRateLimiter(10);
+const chatMessageRateLimit = createChatRateLimiter(20);
 
 function cleanExpiredChatApprovals() {
   const expiry = Date.now() - CHAT_APPROVAL_TTL_MS;
@@ -4717,7 +4747,7 @@ function authorizeChatOperator(req: express.Request, res: express.Response): boo
   return true;
 }
 
-app.get('/api/chat/approvals', (req, res) => {
+app.get('/api/chat/approvals', chatApprovalListRateLimit, (req, res) => {
   if (!isSameOriginApprovalRequest(req)) {
     return res.status(403).json({ success: false, error: 'Lista zatwierdzeń jest dostępna wyłącznie z tej aplikacji.' });
   }
@@ -4735,7 +4765,7 @@ app.get('/api/chat/approvals', (req, res) => {
   return res.json({ success: true, approvals });
 });
 
-app.post('/api/chat/approvals/:id', async (req, res) => {
+app.post('/api/chat/approvals/:id', chatApprovalDecisionRateLimit, async (req, res) => {
   if (!isSameOriginApprovalRequest(req)) {
     return res.status(403).json({ success: false, error: 'Decyzje są dostępne wyłącznie z tej aplikacji.' });
   }
@@ -5616,7 +5646,7 @@ app.post('/api/agents/inbox/read', (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/triad/message', async (req, res) => {
+app.post('/api/triad/message', chatMessageRateLimit, async (req, res) => {
   const message: unknown = req.body?.message;
   const attachmentValidation = validateChatAttachments(req.body?.attachments ?? []);
   if (!attachmentValidation.valid) {
