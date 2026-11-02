@@ -121,6 +121,21 @@ function addTask(task) {
   return item;
 }
 
+async function refreshDiagnostics() {
+  const output = document.querySelector('#diagnostics-result');
+  const button = document.querySelector('#refresh-diagnostics');
+  button.disabled = true;
+  output.textContent = 'Odczyt rzeczywistego stanu runtime…';
+  try {
+    const data = await request('/diagnostics');
+    output.textContent = JSON.stringify(data, null, 2);
+  } catch (error) {
+    output.textContent = `Diagnostyka niedostępna: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function refreshStatus() {
   const systemStatus = document.querySelector('#system-status');
   try {
@@ -219,6 +234,8 @@ document.querySelector('#terminal-form').addEventListener('submit', async (event
 });
 
 document.querySelector('#refresh-tasks').addEventListener('click', refreshTasks);
+document.querySelector('#refresh-diagnostics').addEventListener('click', refreshDiagnostics);
 void refreshStatus();
 void refreshTasks();
+void refreshDiagnostics();
 void refreshChatHistory();

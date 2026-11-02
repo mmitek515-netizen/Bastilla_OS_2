@@ -239,6 +239,16 @@ def run_e2e() -> None:
                     time.sleep(0.1)
                 if not ready:
                     raise TimeoutError("Debian 13 UI did not finish loading from HTTP.")
+                diagnostics_ready = devtools.evaluate(
+                    """(() => {
+                      const output = document.querySelector('#diagnostics-result').textContent;
+                      return output.includes('"generated_at"') &&
+                        output.includes('"kvm_device"') &&
+                        output.includes('"not_tested"');
+                    })()"""
+                )
+                if not diagnostics_ready:
+                    raise AssertionError("The UI did not render diagnostics from the HTTP API.")
 
                 result = devtools.evaluate(
                     """(async () => {
@@ -331,7 +341,7 @@ def run_e2e() -> None:
                     raise AssertionError("The UI overflows or does not switch columns responsively.")
                 print(
                     "PASS Debian 13 Chromium E2E over loopback HTTP: UI, four profiles, "
-                    "SSE chat, terminal, session reload/reset, desktop and 320px layout; "
+                    "runtime diagnostics, SSE chat, terminal, session reload/reset, desktop and 320px layout; "
                     "no model inference claimed."
                 )
             finally:

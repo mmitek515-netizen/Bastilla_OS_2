@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import shutil
 import shlex
 import threading
 import time
@@ -84,6 +85,22 @@ def debian_runtime() -> dict[str, str | bool]:
     }
 
 
+def memory_metrics() -> dict[str, int | str | None]:
+    try:
+        values = {}
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key in {"MemTotal", "MemAvailable"}:
+                values[key] = int(value.strip().split()[0]) * 1024
+        total = values.get("MemTotal")
+        available = values.get("MemAvailable")
+        if total is None or available is None:
+            raise ValueError("Memory metrics are incomplete.")
+        return {"status": "available", "total_bytes": total, "available_bytes": available}
+    except (OSError, ValueError, IndexError):
+        return {"status": "unavailable", "total_bytes": None, "available_bytes": None}
+
+
 class DemoApplication:
     def __init__(
         self,
@@ -96,6 +113,7 @@ class DemoApplication:
         self._tasks: list[dict] = []
         self._events: list[dict] = []
         self._sessions: dict[str, dict] = {}
+        self.started_at = time.monotonic()
 
     def get_session(self, session_id: str | None = None) -> dict | None:
         now = time.monotonic()
@@ -253,6 +271,61 @@ class DemoApplication:
             "agents": self.agent_status(),
         }
 
+    def diagnostics(self) -> dict:
+        kvm_device = Path("/dev/kvm")
+        if not kvm_device.exists():
+            kvm_status = "unavailable"
+        elif os.access(kvm_device, os.R_OK | os.W_OK):
+            kvm_status = "available"
+        else:
+            kvm_status = "permission_denied"
+        try:
+            disk = shutil.disk_usage(self.workspace)
+            workspace = {
+                "status": "available",
+                "total_bytes": disk.total,
+                "free_bytes": disk.free,
+            }
+        except OSError:
+            workspace = {
+                "status": "unavailable",
+                "total_bytes": None,
+                "free_bytes": None,
+            }
+        return {
+            "generated_at": utc_now(),
+            "application": {
+                "status": "running",
+                "uptime_seconds": max(0, int(time.monotonic() - self.started_at)),
+            },
+            "runtime": {
+                "python": platform.python_version(),
+                "system": platform.system(),
+                "kernel": platform.release(),
+                "architecture": platform.machine(),
+                "cpu_count": os.cpu_count(),
+                "operating_system": debian_runtime(),
+            },
+            "resources": {
+                "memory": memory_metrics(),
+                "workspace": workspace,
+            },
+            "virtualization": {
+                "kvm_device": {"status": kvm_status},
+                "qemu_x86_64_binary": "available" if shutil.which("qemu-system-x86_64") else "unavailable",
+                "docker_binary": "available" if shutil.which("docker") else "unavailable",
+            },
+            "integrations": {
+                "model": self.model.status(),
+                "agents": [
+                    {"id": agent["id"], "worker": agent["worker"]}
+                    for agent in self.agent_status()
+                ],
+                "mcp": {"implementation": "not_implemented", "connection": "not_tested"},
+                "gpt_actions": {"implementation": "not_implemented", "connection": "not_tested"},
+            },
+        }
+
     def agent_status(self) -> list[dict]:
         return [
             {
@@ -356,6 +429,8 @@ class Debian13Handler(BaseHTTPRequestHandler):
             return
         if path == f"/api/{API_VERSION}/status":
             self._send_json(200, self.application.status())
+        elif path == f"/api/{API_VERSION}/diagnostics":
+            self._send_json(200, self.application.diagnostics())
         elif path == f"/api/{API_VERSION}/agents":
             self._send_json(200, {"agents": self.application.agent_status()})
         elif path == f"/api/{API_VERSION}/tasks":

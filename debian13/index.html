@@ -29,6 +29,14 @@
         <h2 id="agents-title">Profile agentów</h2>
         <ul id="agents" class="agents"></ul>
       </section>
+      <section class="card" aria-labelledby="diagnostics-title">
+        <div class="section-heading">
+          <h2 id="diagnostics-title">Narzędzia diagnostyczne</h2>
+          <button id="refresh-diagnostics" class="secondary" type="button">Uruchom odczyt</button>
+        </div>
+        <p class="muted">Odczyt lokalnego runtime i dostępności narzędzi; nie uruchamia testów zewnętrznych usług.</p>
+        <pre id="diagnostics-result" class="result" role="status" aria-live="polite">Ładowanie diagnostyki…</pre>
+      </section>
       <div class="columns">
         <section class="card" aria-labelledby="chat-title">
           <div class="section-heading">

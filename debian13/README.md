@@ -31,6 +31,7 @@ All paths are rooted at `/api/v1`. JSON errors use `{"error": "..."}`.
 | Method and path | Contract |
 | --- | --- |
 | `GET /api/v1/status` | Actual app, OS, local model, profile, and task-storage status. |
+| `GET /api/v1/diagnostics` | Read-only runtime/resources, KVM device access, QEMU/Docker binary presence, model and agent status. Does not verify VM boot or service readiness; MCP/GPT Actions remain unimplemented and untested. |
 | `GET /api/v1/agents` | Four configured profile identities/roles; explicitly not worker processes. |
 | `GET /api/v1/tasks` | Recent in-memory tasks with `queued`, `running`, `completed`, or `failed` state. |
 | `GET /api/v1/events` | Bounded in-memory task lifecycle audit entries; prompts and secrets are excluded. |
@@ -49,6 +50,12 @@ Disconnecting a client stops forwarding model output; a partially streamed
 response is not saved as a completed conversation turn.
 Only completed model exchanges are forwarded as context to later model requests;
 local terminal and status output stays out of that context.
+
+The diagnostics endpoint reads local runtime details and tool availability only;
+it does not attempt MCP, GPT Actions, Codex, external network, VM boot, or Docker
+daemon connections. KVM permission failures and missing devices are distinct;
+QEMU/Docker results report binary presence only. Unavailable memory metrics are
+reported as unavailable. Profiles remain configured roles, not active workers.
 
 ## Run locally
 
@@ -104,6 +111,23 @@ implementations of one API yet.
 4. **Aria UI:** extend the UI proxy and views to consume sessions, SSE, task/events and approved proposals; run browser E2E against the combined service on desktop and narrow mobile widths.
 
 **Blockers:** PRs #94–#96 are still separate draft changes and use three different API/security shapes. The new demo is loopback-only, stores sessions in process memory, has no approval API or write operations, and depends on a real model that is currently unconfigured. Automated E2E covers the current demo, not the three unmerged branches. CI remains subject to GitHub's `action_required` gate; local green tests are reported separately and do not clear that gate.
+
+### Cross-check of requests #99–#107
+
+These are tracked requests, not completed acceptance criteria for this incremental
+Alex integration step.
+
+| Issue | Current evidence in this branch | Still required |
+| --- | --- | --- |
+| #99 | Standalone chat, four profiles, read-only terminal, and session history exist. | Collapsible sidebar, group/agent-initiated conversation, votes, Vision, and requested screenshot set. |
+| #100 | No reaction API or voter records. | Authenticated, persisted votes with visible voters and withdrawal. |
+| #101 | Per-process sessions and SSE responses are tested. | Sidebar/history navigation, stop/cancel, persistent reconnect, and bidirectional/group chat. |
+| #102 | No image upload or Vision backend. | Validated image handling and a real configured Vision inference path. |
+| #103 | Chromium E2E checks desktop and 320 px layouts. | 360/412 px, physical-device checks, and authentic requested screenshots. |
+| #104 | Terminal accepts only bounded read-only `pwd`, `ls`, and `cat`. | Script editor, isolated interactive execution, stdin/stdout streaming, stop, and approval. |
+| #105 | Local Ollama is the only model adapter; no MCP/GPT Actions/Codex connection is implemented. | Secure configurations and separately verified real integrations and E2E. |
+| #106 | In-memory request tasks are observable; there is no Work planner or durable queue. | Multi-step durable jobs, controls, verified artifacts, approval and audit lifecycle. |
+| #107 | Read-only runtime/resource/tool availability is surfaced by `/api/v1/diagnostics`. | Logs, active test execution/cancellation, integration probes, export, history, and rollback. |
 
 ## Shared integration boundary
 

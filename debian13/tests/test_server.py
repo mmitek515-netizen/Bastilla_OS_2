@@ -1,4 +1,5 @@
 import json
+import platform
 import sys
 import tempfile
 import threading
@@ -163,6 +164,37 @@ class Debian13ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([agent["id"] for agent in agents["agents"]], ["aria", "astyria", "aurelius", "alex"])
         self.assertTrue(all(agent["worker"] == "not_running" for agent in agents["agents"]))
+
+    def test_diagnostics_reports_observed_runtime_and_unverified_integrations(self):
+        status, diagnostics = self.request("/api/v1/diagnostics")
+        self.assertEqual(status, 200)
+        self.assertEqual(diagnostics["application"]["status"], "running")
+        self.assertEqual(diagnostics["runtime"]["system"], platform.system())
+        self.assertEqual(diagnostics["runtime"]["architecture"], platform.machine())
+        self.assertTrue(
+            diagnostics["runtime"]["cpu_count"] is None
+            or diagnostics["runtime"]["cpu_count"] >= 1
+        )
+        self.assertIn(diagnostics["resources"]["memory"]["status"], {"available", "unavailable"})
+        self.assertIn(diagnostics["resources"]["workspace"]["status"], {"available", "unavailable"})
+        self.assertIn(
+            diagnostics["virtualization"]["kvm_device"]["status"],
+            {"available", "permission_denied", "unavailable"},
+        )
+        self.assertIn(
+            diagnostics["virtualization"]["qemu_x86_64_binary"],
+            {"available", "unavailable"},
+        )
+        self.assertIn(
+            diagnostics["virtualization"]["docker_binary"],
+            {"available", "unavailable"},
+        )
+        self.assertEqual(diagnostics["integrations"]["model"]["inference"], "not_verified")
+        self.assertTrue(
+            all(agent["worker"] == "not_running" for agent in diagnostics["integrations"]["agents"])
+        )
+        self.assertEqual(diagnostics["integrations"]["mcp"]["connection"], "not_tested")
+        self.assertEqual(diagnostics["integrations"]["gpt_actions"]["connection"], "not_tested")
 
     def test_help_completes_a_task_and_emits_bounded_audit_events(self):
         status, response = self.request("/api/v1/chat", {"message": "/help", "agent": "aria"})
