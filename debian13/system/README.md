@@ -2,8 +2,9 @@
 
 This is a new, standalone Debian 13 system prototype. It does not depend on the
 legacy Bastilla OS 2 application or modify its API. The first stage provides an
-authenticated local API, a constrained command terminal, four selectable
-agent profiles, and an optional real OpenAI-compatible chat provider.
+authenticated local API and runtime diagnostics, a constrained command
+terminal, four selectable agent profiles, and an optional real OpenAI-compatible
+chat provider.
 
 ## What is and is not running
 
@@ -116,11 +117,11 @@ For the isolated HTTP smoke test, build `debian13-system:local` first; the test
 starts a temporary container with a random API token, loopback-only ephemeral
 port, read-only root filesystem, dropped capabilities, and resource limits. It
 checks unauthenticated/invalid-token rejection, profiles, non-root terminal
-execution, configured container isolation via Docker inspect, denied writes to
-the root filesystem, an unconfigured chat provider, and the 429 rate-limit
-response, then removes the container. It reports the image ID and checked
-container settings; it does not boot an OS image or provide continuous host
-monitoring.
+execution, authenticated runtime diagnostics, configured container isolation via
+Docker inspect, denied writes to the root filesystem, an unconfigured chat
+provider, and the 429 rate-limit response, then removes the container. It reports
+the image ID and checked container settings; it does not boot an OS image or
+provide continuous host monitoring.
 
 The repository CI runs Python compilation and unit tests, shell syntax,
 systemd, Compose, and image-build checks alongside the existing application
@@ -143,6 +144,7 @@ separate; model output is never executed as a command.
 | --- | --- |
 | `GET /healthz` | Liveness only: `{"status":"ok"}` |
 | `GET /v1/profiles` | Profile IDs/roles, all with `active:false`, and provider configuration status |
+| `GET /v1/diagnostics` | Authenticated, read-only process UID/GID, workspace writability, provider configuration, Python version, and Linux security fields when `/proc/self/status` is available; no credentials or boot claim |
 | `POST /v1/terminal` | `{"command":"ls"}`; direct allowlisted argv execution and bounded output |
 | `POST /v1/chat` | `{"profile":"aria","message":"..."}`; real provider response or explicit error |
 

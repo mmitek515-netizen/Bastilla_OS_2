@@ -7,6 +7,7 @@ import hmac
 import http.server
 import json
 import os
+import platform
 import selectors
 import shlex
 import signal
@@ -259,6 +260,38 @@ def complete_chat(profile: str, message: str, config: dict) -> tuple[str, str]:
     return content.strip()[:MAX_MESSAGE_CHARS], config["model_name"]
 
 
+def runtime_diagnostics(server) -> dict:
+    linux_security = {}
+    try:
+        status = Path("/proc/self/status").read_text(encoding="utf-8")
+        for line in status.splitlines():
+            name, separator, value = line.partition(":")
+            if not separator:
+                continue
+            if name == "NoNewPrivs":
+                linux_security["noNewPrivileges"] = value.strip() == "1"
+            elif name == "Seccomp":
+                linux_security["seccompMode"] = int(value.strip())
+            elif name == "CapEff":
+                linux_security["effectiveCapabilities"] = value.strip()
+    except (OSError, ValueError):
+        pass
+
+    return {
+        "service": "debian13-system",
+        "pythonVersion": platform.python_version(),
+        "effectiveUid": os.geteuid(),
+        "effectiveGid": os.getegid(),
+        "workspaceWritable": os.access(server.workspace, os.W_OK),
+        "providerConfigured": bool(
+            server.config["model_chat_url"]
+            and server.config["model_api_key"]
+            and server.config["model_name"]
+        ),
+        "linuxSecurity": linux_security,
+    }
+
+
 class Debian13Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
@@ -368,6 +401,9 @@ class SystemHandler(http.server.BaseHTTPRequestHandler):
                     and self.server.config["model_name"]
                 ),
             })
+            return
+        if self.path == "/v1/diagnostics":
+            self._send_json(200, runtime_diagnostics(self.server))
             return
         self._send_json(404, {"error": {"code": "not_found", "requestId": str(uuid.uuid4())}})
 

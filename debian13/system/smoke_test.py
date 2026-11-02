@@ -116,6 +116,14 @@ def main() -> None:
         assert status == 200 and len(profiles["profiles"]) == 4
         assert all(profile["active"] is False for profile in profiles["profiles"])
 
+        status, diagnostics, _ = request_json(base_url, "/v1/diagnostics", TOKEN)
+        assert status == 200
+        assert diagnostics["service"] == "debian13-system"
+        assert diagnostics["effectiveUid"] == 10001
+        assert diagnostics["workspaceWritable"] is True
+        assert diagnostics["providerConfigured"] is False
+        assert diagnostics["linuxSecurity"].get("noNewPrivileges") is True
+
         status, terminal, _ = request_json(
             base_url, "/v1/terminal", TOKEN, {"command": "pwd"}
         )
@@ -143,7 +151,7 @@ def main() -> None:
             "PASS: isolated Debian container "
             f"{container['Image']} (uid=10001, read_only_rootfs, cap_drop=ALL, "
             "loopback_port, no_new_privileges); write denied; "
-            "health, bearer auth, profiles, terminal, fail-closed chat, and rate limit."
+            "health, bearer auth, diagnostics, profiles, terminal, fail-closed chat, and rate limit."
         )
     finally:
         subprocess.run(["docker", "rm", "--force", NAME], check=False, capture_output=True)

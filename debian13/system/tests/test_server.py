@@ -1,5 +1,6 @@
 import http.client
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -76,6 +77,25 @@ class Debian13ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([profile["id"] for profile in data["profiles"]], ["aria", "astyria", "aurelius", "alex"])
         self.assertTrue(all(profile["active"] is False for profile in data["profiles"]))
+
+    def test_diagnostics_are_authenticated_and_do_not_disclose_secrets(self):
+        self.assertEqual(self.request_json("GET", "/v1/diagnostics", token=None)[0], 401)
+        self.server.config.update({
+            "model_chat_url": "https://provider.example/v1/chat/completions",
+            "model_api_key": "diagnostics-provider-secret",
+            "model_name": "diagnostics-test-model",
+        })
+        status, data = self.request_json("GET", "/v1/diagnostics")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["service"], "debian13-system")
+        self.assertEqual(data["effectiveUid"], os.geteuid())
+        self.assertTrue(data["workspaceWritable"])
+        self.assertTrue(data["providerConfigured"])
+        self.assertIsInstance(data["linuxSecurity"], dict)
+        serialized = json.dumps(data)
+        self.assertNotIn(TOKEN, serialized)
+        self.assertNotIn("diagnostics-provider-secret", serialized)
+        self.assertNotIn("diagnostics-test-model", serialized)
 
     def test_terminal_executes_allowlisted_argv_without_shell_or_secret_inheritance(self):
         status, data = self.request_json("POST", "/v1/terminal", {"command": "cat hello.txt"})
