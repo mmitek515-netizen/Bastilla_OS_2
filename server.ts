@@ -79,7 +79,7 @@ if (fs.existsSync('.env.local')) {
 const execFileAsync = promisify(execFile);
 const terminalCommandEnv: NodeJS.ProcessEnv = {
   HOME: process.env.HOME || '/nonexistent',
-  PATH: process.env.PATH || '/usr/bin:/bin',
+  PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
   ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
   ...(process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {}),
 };
@@ -2220,7 +2220,7 @@ app.delete('/api/apps/:id', (req, res) => {
 });
 
 // 8. POST /api/apps/execute (and alias /api/apps/command) - Terminal Execution Engine for Applications
-app.post(['/api/apps/execute', '/api/apps/command'], limitTerminalRequests, async (req, res) => {
+const executeAppCommand: express.RequestHandler = async (req, res) => {
   const { command, appDir } = req.body;
 
   if (!command || typeof command !== 'string') {
@@ -2438,9 +2438,13 @@ Plik został zapisany w katalogu /exports i jest natychmiast widoczny w zakładc
       } else {
         try {
           const projectRoot = path.resolve('.');
-          const runCwd = appDir && fs.existsSync(path.join(APPS_DIR, appDir))
-            ? path.join(APPS_DIR, appDir)
-            : projectRoot;
+          let runCwd = projectRoot;
+          if (typeof appDir === 'string' && /^[a-zA-Z0-9_-]+$/.test(appDir)) {
+            const candidateDir = path.join(APPS_DIR, appDir);
+            try {
+              if (fs.lstatSync(candidateDir).isDirectory()) runCwd = candidateDir;
+            } catch {}
+          }
           const { stdout, stderr } = await executeTerminalCommand(shellCmd, runCwd);
           output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
           if (!output.trim()) output = '[Wykonano pomyślnie]';
@@ -2456,7 +2460,9 @@ Plik został zapisany w katalogu /exports i jest natychmiast widoczny w zakładc
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+app.post('/api/apps/execute', limitTerminalRequests, executeAppCommand);
+app.post('/api/apps/command', limitTerminalRequests, executeAppCommand);
 
 // ============================================================================
 // --- ASTYRIA WITHOUT_NLP DETERMINISTIC HARMONIC ENGINE API ENDPOINTS ---

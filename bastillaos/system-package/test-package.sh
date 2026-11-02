@@ -206,13 +206,22 @@ node -e "
   if (!terminalResponse.ok || terminal.output !== 'BASTILLAOS_TEST_SECRET=') {
     throw new Error('terminal command inherited the server API secret');
   }
-  for (let index = 0; index < 30; index++) {
+  const appCommandResponse = await fetch(baseUrl + '/api/apps/execute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'sh pwd', appDir: '../../' }),
+  });
+  const appCommand = await appCommandResponse.json();
+  if (!appCommandResponse.ok || appCommand.output.trim() !== process.cwd()) {
+    throw new Error('application terminal accepted an appDir outside the applications directory');
+  }
+  for (let index = 0; index < 29; index++) {
     const response = await fetch(baseUrl + '/api/kernel/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: 'rate_limit_probe' }),
     });
-    if (response.status !== (index === 29 ? 429 : 200)) {
+    if (response.status !== (index === 28 ? 429 : 200)) {
       throw new Error('terminal request rate limit did not enforce its per-minute quota');
     }
   }
