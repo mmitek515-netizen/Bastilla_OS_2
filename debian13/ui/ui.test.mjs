@@ -45,6 +45,15 @@ async function startTestDouble(t) {
       };
     } else if (request.method === 'GET' && path === '/api/v1/tasks') {
       payload = { tasks: [] };
+    } else if (request.method === 'GET' && path === '/api/v1/events') {
+      payload = {
+        events: [{
+          at: '2026-11-02T13:00:00+00:00',
+          type: 'task.completed',
+          agent: 'aria',
+          task_id: 'test-event-task',
+        }],
+      };
     } else if (request.method === 'GET' && path === `/api/v1/sessions/${TEST_SESSION_ID}/messages`) {
       payload = {
         session_id: TEST_SESSION_ID,
@@ -115,10 +124,11 @@ test('exposes four configured profiles without claiming their workers are runnin
 
 test('uses the v1 GET status, agents, and tasks HTTP endpoints', async (t) => {
   const { api, requests } = await startTestDouble(t);
-  const [status, agents, tasks] = await Promise.all([
+  const [status, agents, tasks, events] = await Promise.all([
     api.getStatus(),
     api.getAgents(),
     api.getTasks(),
+    api.getEvents(),
   ]);
   assert.equal(status.model.status, 'not_configured');
   assert.equal(status.model.inference, 'not_verified');
@@ -127,8 +137,10 @@ test('uses the v1 GET status, agents, and tasks HTTP endpoints', async (t) => {
   assert.ok(agents.agents.every(({ status: profile, worker }) =>
     profile === 'profile_configured' && worker === 'not_running'));
   assert.deepEqual(tasks, { tasks: [] });
+  assert.equal(events.events[0].type, 'task.completed');
   assert.deepEqual(requests.map(({ method, path }) => `${method} ${path}`).sort(), [
     'GET /api/v1/agents',
+    'GET /api/v1/events',
     'GET /api/v1/status',
     'GET /api/v1/tasks',
   ]);
@@ -207,6 +219,8 @@ test('provides responsive UI with independent loading and API error states', asy
   assert.match(html, /id="mobile-menu"/);
   assert.match(html, /id="chat-history"/);
   assert.match(html, /data-view="work"/);
+  assert.match(html, /id="event-list"/);
+  assert.match(html, /nie jest to strumień na żywo ani systemowy dziennik Debiana/);
   assert.match(html, /id="chat-stop"/);
   assert.match(html, /API v1 nie obsługuje czatu grupowego/);
   assert.match(html, /nie udostępnia[\s\S]*planów wieloetapowych/);
@@ -216,7 +230,7 @@ test('provides responsive UI with independent loading and API error states', asy
   assert.match(css, /position: sticky/);
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.match(css, /:focus-visible/);
-  for (const endpoint of ["'status'", "'agents'", "'tasks'", "'chat/stream'", "'terminal'", 'sessions/${encodeURIComponent']) {
+  for (const endpoint of ["'status'", "'agents'", "'tasks'", "'events'", "'chat/stream'", "'terminal'", 'sessions/${encodeURIComponent']) {
     assert.ok(app.includes(endpoint), `expected API endpoint ${endpoint}`);
   }
   assert.match(app, /error\.status === 503/);

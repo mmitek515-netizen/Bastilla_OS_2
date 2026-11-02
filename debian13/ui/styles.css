@@ -737,6 +737,41 @@ h2 {
   color: #ff9a9f;
 }
 
+.event-log {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid rgb(145 161 181 / 16%);
+}
+
+.event-log .section-heading {
+  margin-bottom: 8px;
+}
+
+.event-list {
+  display: grid;
+  gap: 7px;
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+
+.event-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgb(145 161 181 / 14%);
+  border-radius: 9px;
+  color: #cbd6e3;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.event-metadata {
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .local-badge {
   display: inline-flex;
   align-items: center;

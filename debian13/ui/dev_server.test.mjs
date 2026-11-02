@@ -142,12 +142,16 @@ test('real loopback proxy allows only contract routes and normalizes upstream he
   assert.equal(history.status, 200);
   assert.equal((await history.json()).path, `/api/v1/sessions/${TEST_SESSION_ID}/messages`);
 
-  const denied = await fetch(`${baseUrl}/api/v1/events`);
+  const events = await fetch(`${baseUrl}/api/v1/events`);
+  assert.equal(events.status, 200);
+  assert.deepEqual(await events.json(), { ok: true, path: '/api/v1/events' });
+
+  const denied = await fetch(`${baseUrl}/api/v1/agents/extra`);
   assert.equal(denied.status, 404);
   assert.deepEqual(await denied.json(), { error: 'Nie znaleziono endpointu API.' });
   const invalidSession = await fetch(`${baseUrl}/api/v1/sessions/not-a-uuid/messages`);
   assert.equal(invalidSession.status, 404);
-  assert.equal(upstream.requests.length, 4, 'disallowed paths must not reach the upstream API');
+  assert.equal(upstream.requests.length, 5, 'disallowed paths must not reach the upstream API');
 });
 
 test('real loopback proxy rejects oversized writes before forwarding', async (t) => {

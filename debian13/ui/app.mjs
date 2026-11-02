@@ -115,6 +115,7 @@ export function createApiClient({ fetchImpl = globalThis.fetch, baseUrl = '' } =
     getStatus: () => request('status'),
     getAgents: () => request('agents'),
     getTasks: () => request('tasks'),
+    getEvents: () => request('events'),
     getMessages: (sessionId) => request(`sessions/${encodeURIComponent(sessionId)}/messages`),
     chatStream,
     terminal: (command) => post('terminal', { command }),
@@ -305,6 +306,42 @@ function renderTasks(tasks) {
   setText('tasks-error', '');
 }
 
+function renderEvents(events) {
+  const list = document.getElementById('event-list');
+  if (!list) return;
+  const fragment = document.createDocumentFragment();
+  for (const event of events) {
+    if (
+      typeof event?.type !== 'string'
+      || typeof event.agent !== 'string'
+      || typeof event.task_id !== 'string'
+    ) continue;
+    const item = document.createElement('li');
+    item.className = 'event-item';
+    const detail = document.createElement('span');
+    const agent = AGENT_PROFILES.find((profile) => profile.id === event.agent)?.name ?? event.agent;
+    detail.textContent = `${event.type} · ${agent}`;
+    const metadata = document.createElement('span');
+    metadata.className = 'event-metadata';
+    const time = new Date(event.at);
+    const timestamp = Number.isNaN(time.getTime()) ? 'czas nieznany' : time.toLocaleString('pl-PL');
+    metadata.textContent = `${timestamp} · ${event.task_id}`;
+    item.append(detail, metadata);
+    fragment.append(item);
+  }
+  if (!fragment.childNodes.length) {
+    const empty = document.createElement('li');
+    empty.className = 'empty-state';
+    empty.textContent = events.length
+      ? 'Brak zdarzeń o rozpoznanym formacie.'
+      : 'API nie zarejestrowało jeszcze zdarzeń.';
+    fragment.append(empty);
+  }
+  list.replaceChildren(fragment);
+  setText('events-count', `${events.length} zdarzeń · pamięć procesu`);
+  setText('events-error', '');
+}
+
 function readHistory() {
   try {
     const history = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]');
@@ -402,6 +439,31 @@ async function loadTasks() {
     const list = document.getElementById('task-list');
     if (list) list.replaceChildren();
   }
+}
+
+async function loadEvents() {
+  setText('events-count', 'Pobieranie zdarzeń…');
+  setText('events-error', '');
+  const list = document.getElementById('event-list');
+  if (list) {
+    const loading = document.createElement('li');
+    loading.className = 'empty-state';
+    loading.textContent = 'Pobieranie zdarzeń z API…';
+    list.replaceChildren(loading);
+  }
+  try {
+    const payload = await api.getEvents();
+    if (!Array.isArray(payload.events)) throw new ApiError('Nieprawidłowy format dziennika zdarzeń.');
+    renderEvents(payload.events);
+  } catch (error) {
+    setText('events-count', 'Zdarzenia niedostępne');
+    setText('events-error', error.message);
+    if (list) list.replaceChildren();
+  }
+}
+
+async function refreshWork() {
+  await Promise.all([loadTasks(), loadEvents()]);
 }
 
 async function refreshDashboard() {
@@ -511,7 +573,7 @@ function bindNavigation() {
   document.querySelectorAll('[data-view]').forEach((button) => {
     button.addEventListener('click', () => {
       showView(button.dataset.view);
-      if (button.dataset.view === 'work') void loadTasks();
+      if (button.dataset.view === 'work') void refreshWork();
       setMobileSidebar(false);
     });
   });
@@ -663,7 +725,7 @@ if (typeof document !== 'undefined') {
   bindTerminalForm();
   renderHistory();
   document.getElementById('refresh-status')?.addEventListener('click', refreshDashboard);
-  document.getElementById('refresh-tasks')?.addEventListener('click', loadTasks);
+  document.getElementById('refresh-tasks')?.addEventListener('click', refreshWork);
   void refreshDashboard();
   let savedSession = '';
   try {

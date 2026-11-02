@@ -16,12 +16,15 @@ npm run dev:debian13-ui
 ```
 
 Otwórz `http://127.0.0.1:4174`. UI i serwer pośredniczący wiążą się wyłącznie z
-loopbackiem. Serwer pośredniczy tylko w pięciu endpointach UI i nie zastępuje
+loopbackiem. Serwer pośredniczy wyłącznie w jawnie dozwolonych trasach UI i nie zastępuje
 ani nie implementuje API. Dla wdrożenia UI i API muszą być na tym samym originie
 albo za zaufanym reverse proxy przekazującym te ścieżki.
 
-UI pobiera status, profile i zadania z `GET /api/v1/status`, `/agents` i
-`/tasks`. Czat wysyła `POST /api/v1/chat/stream` z `{message, agent}` oraz
+UI pobiera status, profile, zadania i zdarzenia z `GET /api/v1/status`,
+`/agents`, `/tasks` i `/events`. Work pokazuje rzeczywiste, ograniczone zdarzenia
+cyklu życia zadań zwracane przez `/events`; ręczne odświeżenie nie jest strumieniem
+na żywo, a zdarzenia są pamięcią procesu, nie dziennikiem systemowym. Czat wysyła
+`POST /api/v1/chat/stream` z `{message, agent}` oraz
 opcjonalnym `session_id`; zdarzenia SSE `meta`, `delta`, `done` i `error` są
 przekazywane bez buforowania. Historię bieżącej sesji pobiera
 `GET /api/v1/sessions/{uuid}/messages`. Terminal używa
@@ -44,8 +47,8 @@ npm run test:debian13-ui
 ```
 
 Testy HTTP używają jawnie oznaczonego lokalnego test-double i sprawdzają
-przekazywanie SSE bez buforowania, historię, dozwolone `pwd`, odrzucone `id`,
-limit body oraz HTTP 503 bez modelu. Test-double nie jest dowodem aktywnego
+przekazywanie SSE bez buforowania, historię, zdarzenia zadań, dozwolone `pwd`,
+odrzucone `id`, limit body oraz HTTP 503 bez modelu. Test-double nie jest dowodem aktywnego
 modelu ani workera.
 
 Rzeczywisty przegląd UI wykonano w Chromium 156.0.8078.0 z przypiętym backendem

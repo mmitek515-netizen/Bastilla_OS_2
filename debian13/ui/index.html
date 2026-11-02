@@ -145,6 +145,23 @@
             <ul id="task-list" class="task-list" aria-live="polite">
               <li class="empty-state">Pobieranie zadań…</li>
             </ul>
+            <section class="event-log" aria-labelledby="events-title">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">RZECZYWISTY DZIENNIK API</p>
+                  <h2 id="events-title">Zdarzenia zadań</h2>
+                </div>
+              </div>
+              <p class="work-limit-note">
+                Tylko zdarzenia cyklu życia zarejestrowane przez backend w pamięci procesu;
+                nie jest to strumień na żywo ani systemowy dziennik Debiana.
+              </p>
+              <p id="events-error" class="status-error" aria-live="polite"></p>
+              <p id="events-count" class="muted-count">Ładowanie…</p>
+              <ul id="event-list" class="event-list" aria-live="polite">
+                <li class="empty-state">Pobieranie zdarzeń…</li>
+              </ul>
+            </section>
           </section>
 
           <section id="terminal-view" class="workspace-view terminal-view" aria-labelledby="terminal-title" hidden>
