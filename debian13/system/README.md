@@ -116,8 +116,11 @@ For the isolated HTTP smoke test, build `debian13-system:local` first; the test
 starts a temporary container with a random API token, loopback-only ephemeral
 port, read-only root filesystem, dropped capabilities, and resource limits. It
 checks unauthenticated/invalid-token rejection, profiles, non-root terminal
-execution, an unconfigured chat provider, and the 429 rate-limit response, then
-removes the container. It does not boot an OS image.
+execution, configured container isolation via Docker inspect, denied writes to
+the root filesystem, an unconfigured chat provider, and the 429 rate-limit
+response, then removes the container. It reports the image ID and checked
+container settings; it does not boot an OS image or provide continuous host
+monitoring.
 
 The repository CI runs Python compilation and unit tests, shell syntax,
 systemd, Compose, and image-build checks alongside the existing application

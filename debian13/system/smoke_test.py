@@ -70,6 +70,29 @@ def main() -> None:
         env=env,
     )
     try:
+        container = json.loads(docker("inspect", NAME))[0]
+        host_config = container["HostConfig"]
+        assert container["Config"]["User"] == "10001:10001"
+        assert host_config["ReadonlyRootfs"] is True
+        assert host_config["CapDrop"] == ["ALL"]
+        assert any(
+            option.split(":", 1)[0].lower() == "no-new-privileges"
+            for option in host_config["SecurityOpt"]
+        )
+        assert host_config["Memory"] == 512 * 1024 * 1024
+        assert host_config["PidsLimit"] == 64
+        published_port = host_config["PortBindings"]["8080/tcp"][0]
+        assert published_port["HostIp"] == "127.0.0.1"
+
+        write_probe = subprocess.run(
+            ["docker", "exec", "--user", "0", NAME, "/usr/bin/touch", "/etc/debian13-smoke-check"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert write_probe.returncode != 0
+        assert "read-only file system" in write_probe.stderr.lower()
+
         port = docker("port", NAME, "8080/tcp").rsplit(":", 1)[1]
         base_url = f"http://127.0.0.1:{port}"
         for _ in range(40):
@@ -116,7 +139,12 @@ def main() -> None:
                 break
             assert status == 200, f"Authenticated profiles returned HTTP {status}."
         assert limited and limited.isdigit(), "Rate limit did not return HTTP 429 with Retry-After."
-        print("PASS: isolated Debian container health, bearer auth, profiles, terminal, and rate limit.")
+        print(
+            "PASS: isolated Debian container "
+            f"{container['Image']} (uid=10001, read_only_rootfs, cap_drop=ALL, "
+            "loopback_port, no_new_privileges); write denied; "
+            "health, bearer auth, profiles, terminal, fail-closed chat, and rate limit."
+        )
     finally:
         subprocess.run(["docker", "rm", "--force", NAME], check=False, capture_output=True)
 
