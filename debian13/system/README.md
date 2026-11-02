@@ -42,6 +42,16 @@ confined file paths. It has a per-IP request limit and bounds execution time and
 output. Keep the port private; the bearer token is required for all API routes
 except liveness.
 
+## API compatibility boundary
+
+This service exposes `/v1/profiles`, `/v1/terminal`, and `/v1/chat`, and requires
+a bearer token except for `/healthz`. Alex's separate Debian 13 demo contract in
+PR #97 uses `/api/v1/status`, `/api/v1/agents`, session/task routes, and an
+unauthenticated loopback-only listener. The two runtimes are not API-compatible:
+do not point that demo's UI at this service or expose either listener publicly
+without agreeing on a shared contract and authentication model. This service's
+terminal and model chat remain separate; model output is not executed.
+
 Optional real model access uses an OpenAI-compatible chat-completions endpoint.
 Set these variables before starting Compose; the URL must be HTTPS, except that
 HTTP loopback endpoints are allowed for local development:
@@ -96,13 +106,23 @@ external account, payment, model, or network service is required:
 ```sh
 python3 -m unittest discover -s tests -v
 python3 -m py_compile server.py
+python3 smoke_test.py
 systemd-analyze verify systemd/debian13-system.service
 docker compose -f compose.yaml config
 docker compose -f compose.yaml build
 ```
 
-The repository CI runs these Python, shell, systemd, Compose, and image-build
-checks alongside the existing application checks.
+For the isolated HTTP smoke test, build `debian13-system:local` first; the test
+starts a temporary container with a random API token, loopback-only ephemeral
+port, read-only root filesystem, dropped capabilities, and resource limits. It
+checks unauthenticated/invalid-token rejection, profiles, non-root terminal
+execution, an unconfigured chat provider, and the 429 rate-limit response, then
+removes the container. It does not boot an OS image.
+
+The repository CI runs Python compilation and unit tests, shell syntax,
+systemd, Compose, and image-build checks alongside the existing application
+checks. Run `smoke_test.py` locally after the image build for the isolated
+container HTTP checks.
 
 The provider test confirms the selected profile and real HTTP request/response
 flow against a test server; it is not evidence that a production AI account is
