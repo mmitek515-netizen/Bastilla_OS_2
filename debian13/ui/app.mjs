@@ -5,6 +5,10 @@ export const AGENT_PROFILES = Object.freeze([
   { id: 'alex', name: 'Alex', role: 'Architektura i integracja' },
 ]);
 
+const SESSION_KEY = 'debian13-chat-session';
+const HISTORY_KEY = 'debian13-chat-history';
+const SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 export class ApiError extends Error {
   constructor(message, status = 0) {
     super(message);
@@ -14,14 +18,17 @@ export class ApiError extends Error {
 }
 
 export function createApiClient({ fetchImpl = globalThis.fetch, baseUrl = '' } = {}) {
-  async function request(path, options) {
-    let response;
+  async function fetchRequest(path, options) {
     try {
-      response = await fetchImpl(`${baseUrl}/api/v1/${path}`, options);
-    } catch {
+      return await fetchImpl(`${baseUrl}/api/v1/${path}`, options);
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
       throw new ApiError('Runtime nieosiągalny — sprawdź połączenie z API.');
     }
+  }
 
+  async function request(path, options) {
+    const response = await fetchRequest(path, options);
     let payload;
     try {
       payload = await response.json();
@@ -45,11 +52,71 @@ export function createApiClient({ fetchImpl = globalThis.fetch, baseUrl = '' } =
     });
   }
 
+  async function chatStream(message, agent, sessionId, onEvent, signal) {
+    const body = { message, agent };
+    if (sessionId) body.session_id = sessionId;
+    const response = await fetchRequest('chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!response.ok) {
+      let payload;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new ApiError('Runtime zwrócił nieprawidłową odpowiedź.', response.status);
+      }
+      throw new ApiError(
+        typeof payload.error === 'string' ? payload.error : `Żądanie nie powiodło się (HTTP ${response.status}).`,
+        response.status,
+      );
+    }
+    if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream') || !response.body) {
+      throw new ApiError('Runtime nie zwrócił strumienia odpowiedzi.', response.status);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const dispatch = (block) => {
+      let event = 'message';
+      const data = [];
+      for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+      }
+      if (!data.length) return;
+      let payload;
+      try {
+        payload = JSON.parse(data.join('\n'));
+      } catch {
+        throw new ApiError('Runtime wysłał nieprawidłowe zdarzenie czatu.');
+      }
+      onEvent({ event, payload });
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      let separator;
+      while ((separator = /\r?\n\r?\n/.exec(buffer))) {
+        dispatch(buffer.slice(0, separator.index));
+        buffer = buffer.slice(separator.index + separator[0].length);
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) dispatch(buffer);
+  }
+
   return Object.freeze({
     getStatus: () => request('status'),
     getAgents: () => request('agents'),
     getTasks: () => request('tasks'),
-    chat: (message, agent) => post('chat', { message, agent }),
+    getMessages: (sessionId) => request(`sessions/${encodeURIComponent(sessionId)}/messages`),
+    chatStream,
     terminal: (command) => post('terminal', { command }),
   });
 }
@@ -119,6 +186,7 @@ function connectionState(state, label) {
   element.dataset.state = state;
   const text = element.querySelector('span:last-child');
   if (text) text.textContent = label;
+  setText('sidebar-runtime-label', label);
 }
 
 function modelStatusLabel(model) {
@@ -152,9 +220,9 @@ function renderRuntimeStatus(status) {
   connectionState('connected', 'API dostępne');
 }
 
-function appendTranscript(kind, title, content) {
+function appendTranscript(kind, title, content = '') {
   const transcript = document.getElementById('chat-transcript');
-  if (!transcript) return;
+  if (!transcript) return null;
   transcript.querySelector('.empty-state')?.remove();
   const entry = document.createElement('article');
   entry.className = `transcript-entry transcript-${kind}`;
@@ -167,6 +235,29 @@ function appendTranscript(kind, title, content) {
   entry.append(heading, text);
   transcript.append(entry);
   transcript.scrollTop = transcript.scrollHeight;
+  return { entry, heading, text };
+}
+
+function renderTranscriptMessages(messages) {
+  const transcript = document.getElementById('chat-transcript');
+  if (!transcript) return;
+  transcript.replaceChildren();
+  for (const message of messages) {
+    if (!['user', 'assistant'].includes(message.role) || typeof message.content !== 'string') continue;
+    const isUser = message.role === 'user';
+    const name = AGENT_PROFILES.find((agent) => agent.id === message.agent)?.name ?? 'Agent';
+    appendTranscript(
+      isUser ? 'user' : 'assistant',
+      isUser ? `Ty · ${name}` : `${name} · ${message.source ?? 'API'}`,
+      message.content,
+    );
+  }
+  if (!transcript.children.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'Ta sesja nie ma jeszcze zapisanych wiadomości.';
+    transcript.append(empty);
+  }
 }
 
 function renderTerminal(command, output, isError = false) {
@@ -214,7 +305,54 @@ function renderTasks(tasks) {
   setText('tasks-error', '');
 }
 
+function readHistory() {
+  try {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]');
+    return Array.isArray(history)
+      ? history.filter((item) => item && SESSION_ID_PATTERN.test(item.id) && typeof item.title === 'string').slice(0, 20)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeHistory(history) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 20)));
+  } catch {
+    setText('chat-feedback', 'Indeks historii nie może zostać zapisany w przeglądarce.');
+  }
+}
+
+function renderHistory(activeId = '') {
+  const list = document.getElementById('chat-history');
+  if (!list) return;
+  const history = readHistory();
+  list.replaceChildren();
+  if (!history.length) {
+    const empty = document.createElement('li');
+    empty.className = 'history-empty';
+    empty.textContent = 'Brak zapisanych rozmów.';
+    list.append(empty);
+    return;
+  }
+  for (const item of history) {
+    const row = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'history-button';
+    button.textContent = item.title;
+    button.dataset.sessionId = item.id;
+    if (item.id === activeId) button.setAttribute('aria-current', 'true');
+    button.addEventListener('click', () => void loadHistory(item.id));
+    row.append(button);
+    list.append(row);
+  }
+}
+
 const api = createApiClient();
+let activeSessionId = '';
+let activeChatController = null;
 
 async function loadStatus() {
   connectionState('loading', 'Ładowanie statusu…');
@@ -270,38 +408,224 @@ async function refreshDashboard() {
   await Promise.all([loadStatus(), loadAgents(), loadTasks()]);
 }
 
+async function loadHistory(sessionId) {
+  if (!SESSION_ID_PATTERN.test(sessionId)) return;
+  setText('chat-feedback', 'Pobieranie historii rozmowy…');
+  try {
+    const payload = await api.getMessages(sessionId);
+    if (!Array.isArray(payload.messages)) throw new ApiError('Nieprawidłowy format historii rozmowy.');
+    activeSessionId = sessionId;
+    try {
+      sessionStorage.setItem(SESSION_KEY, sessionId);
+    } catch {
+      setText('chat-feedback', 'Historia dostępna do końca tej karty przeglądarki.');
+    }
+    renderTranscriptMessages(payload.messages);
+    renderHistory(activeSessionId);
+    showView('chat');
+    setText('chat-feedback', 'Historia pobrana z pamięci API.');
+  } catch (error) {
+    const history = readHistory().filter((item) => item.id !== sessionId);
+    writeHistory(history);
+    renderHistory(activeSessionId);
+    setText('chat-feedback', error.status === 404
+      ? 'Ta sesja wygasła lub backend został uruchomiony ponownie.'
+      : error.message);
+  }
+}
+
+function recordHistory(sessionId, title) {
+  const history = readHistory().filter((item) => item.id !== sessionId);
+  history.unshift({ id: sessionId, title: title.slice(0, 64) || 'Nowa rozmowa' });
+  writeHistory(history);
+  renderHistory(sessionId);
+  try {
+    sessionStorage.setItem(SESSION_KEY, sessionId);
+  } catch {
+    setText('chat-feedback', 'Sesja działa, ale nie może zostać zapisana w karcie przeglądarki.');
+  }
+}
+
+function showView(view) {
+  const ids = { chat: 'chat-view', work: 'work-view', terminal: 'terminal-view', settings: 'settings-view' };
+  for (const [name, id] of Object.entries(ids)) {
+    const section = document.getElementById(id);
+    if (section) section.hidden = name !== view;
+  }
+  for (const button of document.querySelectorAll('[data-view]')) {
+    const active = button.dataset.view === view;
+    button.classList.toggle('is-active', active);
+    if (button.classList.contains('nav-button')) {
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    } else {
+      button.setAttribute('aria-pressed', String(active));
+    }
+  }
+  const titles = { chat: 'W czym mogę pomóc?', work: 'Work', terminal: 'Terminal', settings: 'Status systemu' };
+  setText('page-title', titles[view] ?? titles.chat);
+}
+
+function setMobileSidebar(open) {
+  const sidebar = document.getElementById('sidebar');
+  const menu = document.getElementById('mobile-menu');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  if (!sidebar || !menu || !backdrop) return;
+  const isMobile = window.matchMedia('(max-width: 760px)').matches;
+  sidebar.classList.toggle('is-open', isMobile && open);
+  sidebar.inert = isMobile && !open;
+  sidebar.setAttribute('aria-hidden', String(isMobile && !open));
+  menu.setAttribute('aria-expanded', String(isMobile && open));
+  menu.setAttribute('aria-label', isMobile && open ? 'Zamknij panel boczny' : 'Otwórz panel boczny');
+  backdrop.hidden = !(isMobile && open);
+  document.body.classList.toggle('sidebar-open', isMobile && open);
+}
+
+function setCollapsedSidebar(collapsed) {
+  const layout = document.getElementById('app-layout');
+  const button = document.getElementById('sidebar-collapse');
+  if (!layout || !button) return;
+  layout.dataset.collapsed = String(collapsed);
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.setAttribute('aria-label', collapsed ? 'Rozwiń panel boczny' : 'Zwiń panel boczny');
+  button.title = collapsed ? 'Rozwiń panel boczny' : 'Zwiń panel boczny';
+}
+
+function bindNavigation() {
+  const menu = document.getElementById('mobile-menu');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const collapse = document.getElementById('sidebar-collapse');
+  const sidebar = document.getElementById('sidebar');
+  const media = window.matchMedia('(max-width: 760px)');
+  menu?.addEventListener('click', () => setMobileSidebar(!sidebar?.classList.contains('is-open')));
+  backdrop?.addEventListener('click', () => setMobileSidebar(false));
+  collapse?.addEventListener('click', () => {
+    const collapsed = document.getElementById('app-layout')?.dataset.collapsed === 'true';
+    setCollapsedSidebar(!collapsed);
+    try {
+      localStorage.setItem('debian13-sidebar-collapsed', String(!collapsed));
+    } catch {
+      // The panel remains usable when browser storage is disabled.
+    }
+  });
+  document.querySelectorAll('[data-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      showView(button.dataset.view);
+      if (button.dataset.view === 'work') void loadTasks();
+      setMobileSidebar(false);
+    });
+  });
+  document.getElementById('new-chat')?.addEventListener('click', () => {
+    activeSessionId = '';
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+    } catch {
+      // Starting a chat does not depend on session storage.
+    }
+    renderHistory();
+    renderTranscriptMessages([]);
+    showView('chat');
+    setText('chat-feedback', 'Nowa sesja zostanie utworzona przez API po wysłaniu wiadomości.');
+    document.getElementById('chat-message')?.focus();
+    setMobileSidebar(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && sidebar?.classList.contains('is-open')) {
+      setMobileSidebar(false);
+      menu?.focus();
+    }
+  });
+  media.addEventListener('change', () => setMobileSidebar(false));
+  try {
+    setCollapsedSidebar(localStorage.getItem('debian13-sidebar-collapsed') === 'true');
+  } catch {
+    setCollapsedSidebar(false);
+  }
+  setMobileSidebar(false);
+}
+
 function bindChatForm() {
   const form = document.getElementById('chat-form');
   if (!form) return;
+  const message = document.getElementById('chat-message');
+  message?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const message = document.getElementById('chat-message');
     const agent = document.getElementById('chat-agent');
     const submit = document.getElementById('chat-submit');
+    const stop = document.getElementById('chat-stop');
     const feedback = document.getElementById('chat-feedback');
     const text = message?.value.trim();
-    if (!text || !agent || !feedback) return;
-    submit.disabled = true;
-    feedback.textContent = 'Wysyłanie do API…';
-    appendTranscript('user', `Ty · ${agent.value}`, text);
+    if (!text || !agent || !feedback || activeChatController) return;
+
+    const controller = new AbortController();
+    activeChatController = controller;
+    const agentName = AGENT_PROFILES.find((profile) => profile.id === agent.value)?.name ?? agent.value;
+    const userMessage = text;
+    appendTranscript('user', `Ty · ${agentName}`, userMessage);
+    const responseBubble = appendTranscript('assistant', `${agentName} · łączenie`);
+    submit.hidden = true;
+    stop.hidden = false;
+    feedback.textContent = 'Łączenie ze strumieniem API…';
+    let responseText = '';
+    let receivedDone = false;
+    let responseSource = '';
+    let responseAgent = agentName;
+    let responseSessionId = '';
+
     try {
-      const result = await api.chat(text, agent.value);
-      if (typeof result.reply !== 'string') throw new ApiError('API nie zwróciło odpowiedzi tekstowej.');
-      appendTranscript('assistant', `${result.agent} · ${result.source}`, result.reply);
+      await api.chatStream(userMessage, agent.value, activeSessionId, ({ event: streamEvent, payload }) => {
+        if (streamEvent === 'meta' && typeof payload.session_id === 'string') {
+          responseSessionId = payload.session_id;
+        } else if (streamEvent === 'delta' && typeof payload.text === 'string') {
+          responseText += payload.text;
+          if (responseBubble) responseBubble.text.textContent = responseText;
+          const transcript = document.getElementById('chat-transcript');
+          if (transcript) transcript.scrollTop = transcript.scrollHeight;
+        } else if (streamEvent === 'done') {
+          receivedDone = true;
+          responseSessionId = payload.session_id ?? responseSessionId;
+          responseSource = payload.source ?? '';
+          responseAgent = AGENT_PROFILES.find((profile) => profile.id === payload.agent)?.name ?? responseAgent;
+        } else if (streamEvent === 'error') {
+          throw new ApiError(typeof payload.error === 'string' ? payload.error : 'Strumień czatu zakończył się błędem.');
+        }
+      }, controller.signal);
+      if (!receivedDone) throw new ApiError('Strumień zakończył się przed potwierdzeniem odpowiedzi.');
+      if (responseBubble) responseBubble.heading.textContent = `${responseAgent} · ${responseSource || 'API'}`;
+      if (responseSessionId && SESSION_ID_PATTERN.test(responseSessionId)) {
+        activeSessionId = responseSessionId;
+        recordHistory(responseSessionId, userMessage);
+      }
       message.value = '';
-      feedback.textContent = result.source === 'ollama'
-        ? 'Odpowiedź modelu lokalnego.'
-        : 'Odpowiedź z lokalnej obsługi polecenia.';
+      feedback.textContent = responseSource === 'ollama'
+        ? 'Odpowiedź modelu lokalnego; rozmowa zapisana w pamięci API.'
+        : 'Odpowiedź lokalnej obsługi polecenia API.';
     } catch (error) {
-      appendTranscript('error', `Błąd API${error.status ? ` · HTTP ${error.status}` : ''}`, error.message);
-      feedback.textContent = error.status === 503
-        ? 'Model niedostępny — API nie wygenerowało odpowiedzi.'
-        : error.message;
+      if (error?.name === 'AbortError') {
+        if (responseBubble) responseBubble.heading.textContent = `${agentName} · przerwano`;
+        feedback.textContent = 'Strumień zatrzymany. Backend zapisuje historię dopiero po zakończeniu odpowiedzi.';
+      } else {
+        if (!responseText && responseBubble) responseBubble.entry.remove();
+        else if (responseBubble) responseBubble.heading.textContent = `${agentName} · odpowiedź nieukończona`;
+        appendTranscript('error', `Błąd API${error.status ? ` · HTTP ${error.status}` : ''}`, error.message);
+        feedback.textContent = error.status === 503
+          ? 'Model niedostępny — API nie wygenerowało odpowiedzi.'
+          : error.message;
+      }
     } finally {
-      submit.disabled = false;
+      activeChatController = null;
+      submit.hidden = false;
+      stop.hidden = true;
       await loadTasks();
     }
   });
+  document.getElementById('chat-stop')?.addEventListener('click', () => activeChatController?.abort());
 }
 
 function bindTerminalForm() {
@@ -334,8 +658,18 @@ function bindTerminalForm() {
 
 if (typeof document !== 'undefined') {
   renderAgentProfiles(document.getElementById('agent-list'));
+  bindNavigation();
   bindChatForm();
   bindTerminalForm();
+  renderHistory();
   document.getElementById('refresh-status')?.addEventListener('click', refreshDashboard);
+  document.getElementById('refresh-tasks')?.addEventListener('click', loadTasks);
   void refreshDashboard();
+  let savedSession = '';
+  try {
+    savedSession = sessionStorage.getItem(SESSION_KEY) ?? '';
+  } catch {
+    // The API-backed chat remains available without browser storage.
+  }
+  if (SESSION_ID_PATTERN.test(savedSession)) void loadHistory(savedSession);
 }

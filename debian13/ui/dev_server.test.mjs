@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+const TEST_SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
 
 async function reserveLoopbackPort() {
   const server = createServer();
@@ -29,6 +30,17 @@ async function startUpstreamDouble(t) {
       contentType: request.headers['content-type'] ?? null,
       body: Buffer.concat(chunks).toString('utf8'),
     });
+    if (request.url === '/api/v1/chat/stream') {
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'X-Upstream-Header': 'must-not-be-relayed',
+      });
+      response.write('event: meta\ndata: {"session_id":"123e4567-e89b-42d3-a456-426614174000"}\n\n');
+      setTimeout(() => {
+        response.end('event: done\ndata: {"source":"local_command"}\n\n');
+      }, 100);
+      return;
+    }
     response.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
       'X-Upstream-Header': 'must-not-be-relayed',
@@ -105,10 +117,37 @@ test('real loopback proxy allows only contract routes and normalizes upstream he
   assert.equal(upstream.requests[1].contentType, 'application/json');
   assert.deepEqual(JSON.parse(upstream.requests[1].body), { message: '/help', agent: 'aria' });
 
+  const stream = await fetch(`${baseUrl}/api/v1/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '/help', agent: 'aria' }),
+  });
+  assert.equal(stream.status, 200);
+  assert.equal(stream.headers.get('content-type'), 'text/event-stream; charset=utf-8');
+  assert.equal(stream.headers.get('x-upstream-header'), null);
+  const reader = stream.body.getReader();
+  const firstEvent = await reader.read();
+  assert.equal(firstEvent.done, false, 'SSE headers and first event should arrive before upstream closes');
+  assert.match(new TextDecoder().decode(firstEvent.value), /event: meta/);
+  let remainingText = '';
+  let streamDone = false;
+  while (!streamDone) {
+    const next = await reader.read();
+    streamDone = next.done;
+    if (next.value) remainingText += new TextDecoder().decode(next.value);
+  }
+  assert.match(remainingText, /event: done/);
+
+  const history = await fetch(`${baseUrl}/api/v1/sessions/${TEST_SESSION_ID}/messages`);
+  assert.equal(history.status, 200);
+  assert.equal((await history.json()).path, `/api/v1/sessions/${TEST_SESSION_ID}/messages`);
+
   const denied = await fetch(`${baseUrl}/api/v1/events`);
   assert.equal(denied.status, 404);
   assert.deepEqual(await denied.json(), { error: 'Nie znaleziono endpointu API.' });
-  assert.equal(upstream.requests.length, 2, 'disallowed path must not reach the upstream API');
+  const invalidSession = await fetch(`${baseUrl}/api/v1/sessions/not-a-uuid/messages`);
+  assert.equal(invalidSession.status, 404);
+  assert.equal(upstream.requests.length, 4, 'disallowed paths must not reach the upstream API');
 });
 
 test('real loopback proxy rejects oversized writes before forwarding', async (t) => {

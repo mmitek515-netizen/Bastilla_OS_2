@@ -6,6 +6,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -16,10 +17,17 @@ API_PATHS = {
     ("GET", "/api/v1/agents"),
     ("GET", "/api/v1/tasks"),
     ("POST", "/api/v1/chat"),
+    ("POST", "/api/v1/chat/stream"),
     ("POST", "/api/v1/terminal"),
 }
+API_SESSION_PATH = re.compile(
+    r"/api/v1/sessions/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/messages",
+)
+API_STREAM_PATH = "/api/v1/chat/stream"
 MAX_PROXY_BODY_BYTES = 16_384
 MAX_PROXY_RESPONSE_BYTES = 1_048_576
+MAX_STREAM_SECONDS = 120
+STREAM_CHUNK_BYTES = 65_536
 
 
 class UiHandler(SimpleHTTPRequestHandler):
@@ -45,7 +53,9 @@ class UiHandler(SimpleHTTPRequestHandler):
 
     def _proxy_api(self) -> None:
         path = urlsplit(self.path).path
-        if (self.command, path) not in API_PATHS:
+        if (self.command, path) not in API_PATHS and not (
+            self.command == "GET" and API_SESSION_PATH.fullmatch(path)
+        ):
             self._send_error_json(404, "Nie znaleziono endpointu API.")
             return
 
@@ -66,16 +76,51 @@ class UiHandler(SimpleHTTPRequestHandler):
             api_port = int(os.environ.get("DEBIAN13_API_PORT", "8765"))
             if not 1 <= api_port <= 65535:
                 raise ValueError("Invalid API port")
-            connection = http.client.HTTPConnection("127.0.0.1", api_port, timeout=5)
+            timeout = MAX_STREAM_SECONDS if path == API_STREAM_PATH else 5
+            connection = http.client.HTTPConnection("127.0.0.1", api_port, timeout=timeout)
             headers = {}
             if self.command == "POST":
-                headers["Content-Type"] = self.headers.get("Content-Type", "")
+                headers["Content-Type"] = "application/json"
             connection.request(self.command, path, body=body, headers=headers)
             response = connection.getresponse()
+            if (
+                path == API_STREAM_PATH
+                and response.status == 200
+                and response.getheader("Content-Type", "").lower().startswith("text/event-stream")
+            ):
+                self.send_response(response.status)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                total_bytes = 0
+                try:
+                    while True:
+                        chunk = response.read1(STREAM_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        total_bytes += len(chunk)
+                        if total_bytes > MAX_PROXY_RESPONSE_BYTES:
+                            limit_event = (
+                                b'event: error\ndata: {"error":"API response exceeds its size limit."}\n\n'
+                            )
+                            self.wfile.write(limit_event)
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError, http.client.HTTPException):
+                    pass
+                finally:
+                    connection.close()
+                return
             payload = response.read(MAX_PROXY_RESPONSE_BYTES + 1)
             status = response.status
             connection.close()
-        except (OSError, ValueError, http.client.HTTPException):
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError, ValueError, http.client.HTTPException):
+            try:
+                connection.close()
+            except (UnboundLocalError, OSError):
+                pass
             self._send_error_json(502, "Runtime API Debian 13 jest niedostępne.")
             return
 

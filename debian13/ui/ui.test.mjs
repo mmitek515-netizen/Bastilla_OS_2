@@ -11,6 +11,7 @@ import {
 
 const uiDirectory = new URL('./', import.meta.url);
 const readUiFile = (name) => readFile(new URL(name, uiDirectory), 'utf8');
+const TEST_SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
 
 async function startTestDouble(t) {
   const requests = [];
@@ -44,17 +45,26 @@ async function startTestDouble(t) {
       };
     } else if (request.method === 'GET' && path === '/api/v1/tasks') {
       payload = { tasks: [] };
-    } else if (request.method === 'POST' && path === '/api/v1/chat') {
+    } else if (request.method === 'GET' && path === `/api/v1/sessions/${TEST_SESSION_ID}/messages`) {
+      payload = {
+        session_id: TEST_SESSION_ID,
+        messages: [{ role: 'user', content: 'TEST-DOUBLE: wcześniejsza wiadomość', agent: 'aria', source: 'ollama' }],
+      };
+    } else if (request.method === 'POST' && path === '/api/v1/chat/stream') {
       if (request.headers['content-type'] !== 'application/json') {
         status = 400;
         payload = { error: 'Wymagany Content-Type: application/json.' };
       } else if (JSON.parse(body).message === '/help') {
-        payload = {
-          reply: 'TEST-DOUBLE: Obsługiwane lokalne polecenia: /help, /status, /terminal pwd.',
-          source: 'local_command',
-          agent: JSON.parse(body).agent,
-          task: { id: 'test-help-task', status: 'completed' },
-        };
+        response.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'X-Debian13-Test-Double': 'true',
+        });
+        response.write(`event: meta\ndata: ${JSON.stringify({ session_id: TEST_SESSION_ID, task_id: 'test-help-task' })}\n\n`);
+        response.write(`event: delta\ndata: ${JSON.stringify({ text: 'TEST-DOUBLE: odpowiedź ' })}\n\n`);
+        response.write(`event: delta\ndata: ${JSON.stringify({ text: 'lokalna.' })}\n\n`);
+        response.write(`event: done\ndata: ${JSON.stringify({ session_id: TEST_SESSION_ID, source: 'local_command', agent: JSON.parse(body).agent, task: { id: 'test-help-task', status: 'completed' } })}\n\n`);
+        response.end();
+        return;
       } else {
         status = 503;
         payload = {
@@ -124,16 +134,40 @@ test('uses the v1 GET status, agents, and tasks HTTP endpoints', async (t) => {
   ]);
 });
 
-test('posts /help to the HTTP test-double and shows the response is mocked', async (t) => {
+test('streams /help from the HTTP test-double and labels the response as mocked', async (t) => {
   const { api, requests } = await startTestDouble(t);
-  const help = await api.chat('/help', 'aria');
-  assert.equal(help.source, 'local_command');
-  assert.match(help.reply, /^TEST-DOUBLE:/);
+  const events = [];
+  await api.chatStream('/help', 'aria', '', (event) => events.push(event));
+  assert.equal(events.at(-1).payload.source, 'local_command');
+  assert.match(events.filter(({ event }) => event === 'delta').map(({ payload }) => payload.text).join(''), /^TEST-DOUBLE:/);
   assert.deepEqual(requests[0], {
     method: 'POST',
-    path: '/api/v1/chat',
+    path: '/api/v1/chat/stream',
     body: { message: '/help', agent: 'aria' },
   });
+});
+
+test('streams v1 SSE events and loads history from the requested session', async (t) => {
+  const { api, requests } = await startTestDouble(t);
+  const events = [];
+  await api.chatStream('/help', 'aria', '', (event) => events.push(event));
+  const history = await api.getMessages(TEST_SESSION_ID);
+
+  assert.deepEqual(events.map(({ event, payload }) => [
+    event,
+    event === 'done' ? payload.source : payload.text ?? payload.session_id,
+  ]), [
+    ['meta', TEST_SESSION_ID],
+    ['delta', 'TEST-DOUBLE: odpowiedź '],
+    ['delta', 'lokalna.'],
+    ['done', 'local_command'],
+  ]);
+  assert.equal(history.messages[0].content, 'TEST-DOUBLE: wcześniejsza wiadomość');
+  assert.deepEqual(requests.map(({ method, path }) => `${method} ${path}`), [
+    'POST /api/v1/chat/stream',
+    `GET /api/v1/sessions/${TEST_SESSION_ID}/messages`,
+  ]);
+  assert.deepEqual(requests[0].body, { message: '/help', agent: 'aria' });
 });
 
 test('posts allowed pwd and denied shell command to the HTTP test-double', async (t) => {
@@ -151,7 +185,7 @@ test('posts allowed pwd and denied shell command to the HTTP test-double', async
 
 test('surfaces HTTP 503 when the test-double has no model, without a fake reply', async (t) => {
   const { api } = await startTestDouble(t);
-  await assert.rejects(api.chat('Napisz odpowiedź', 'aria'), (error) => {
+  await assert.rejects(api.chatStream('Napisz odpowiedź', 'aria', '', () => {}), (error) => {
     assert.ok(error instanceof ApiError);
     assert.equal(error.status, 503);
     assert.match(error.message, /Brak skonfigurowanego modelu/);
@@ -169,13 +203,21 @@ test('provides responsive UI with independent loading and API error states', asy
   assert.match(html, /id="runtime-details"/);
   assert.match(html, /id="agent-list"/);
   assert.match(html, /id="task-list"/);
+  assert.match(html, /id="sidebar-collapse"/);
+  assert.match(html, /id="mobile-menu"/);
+  assert.match(html, /id="chat-history"/);
+  assert.match(html, /data-view="work"/);
+  assert.match(html, /id="chat-stop"/);
+  assert.match(html, /API v1 nie obsługuje czatu grupowego/);
+  assert.match(html, /nie udostępnia[\s\S]*planów wieloetapowych/);
   assert.match(html, /aria-live="polite"/);
-  assert.match(css, /@media \(max-width: 860px\)/);
-  assert.match(css, /@media \(max-width: 520px\)/);
+  assert.match(css, /@media \(max-width: 760px\)/);
+  assert.match(css, /@media \(max-width: 420px\)/);
+  assert.match(css, /position: sticky/);
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.match(css, /:focus-visible/);
-  for (const endpoint of ['status', 'agents', 'tasks', 'chat', 'terminal']) {
-    assert.ok(app.includes(`'${endpoint}'`), `expected API endpoint ${endpoint}`);
+  for (const endpoint of ["'status'", "'agents'", "'tasks'", "'chat/stream'", "'terminal'", 'sessions/${encodeURIComponent']) {
+    assert.ok(app.includes(endpoint), `expected API endpoint ${endpoint}`);
   }
   assert.match(app, /error\.status === 503/);
   assert.doesNotMatch(app, /\.innerHTML\s*=/);
