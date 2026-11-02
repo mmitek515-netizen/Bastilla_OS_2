@@ -21,3 +21,12 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm run verify
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m py_compile debian13/system/server.py debian13/system/tests/test_server.py
+      - run: python -m unittest discover -s debian13/system/tests -v
+      - run: sh -n debian13/system/install.sh
+      - run: systemd-analyze verify debian13/system/systemd/debian13-system.service
+      - run: docker build -t debian13-system:ci debian13/system
+      - run: DEBIAN13_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" docker compose -f debian13/system/compose.yaml config >/dev/null
