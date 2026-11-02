@@ -6,10 +6,12 @@ from __future__ import annotations
 import base64
 import json
 import os
+import signal
 import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -17,8 +19,15 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from model_adapter import OllamaAdapter
+from system_service_adapter import SystemServiceAdapter
 from server import DemoApplication, create_server
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "tests"))
+from system_service_fixture import (
+    TEST_SERVICE_TOKEN,
+    start_system_service,
+    stop_system_service,
+)
 
 
 class DevTools:
@@ -112,7 +121,7 @@ class DevTools:
                 {"id": call_id, "method": method, "params": params or {}}
             ).encode("utf-8")
         )
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             message = json.loads(self._receive())
             if message.get("id") != call_id:
@@ -153,9 +162,10 @@ def available_chromium() -> str:
 
 
 def run_e2e() -> None:
+    system_service, service_thread, service_url = start_system_service()
     app = DemoApplication(
         workspace=Path(__file__).resolve().parent / "workspace",
-        model=OllamaAdapter("", ""),
+        model=SystemServiceAdapter(service_url, TEST_SERVICE_TOKEN),
     )
     server = create_server(port=0, application=app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -183,6 +193,7 @@ def run_e2e() -> None:
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
             devtools = None
             try:
@@ -266,12 +277,13 @@ def run_e2e() -> None:
                         throw new Error('The UI did not load the four API profiles.');
                       }
                       document.querySelector('#agent').value = 'astyria';
-                      document.querySelector('#message').value = '/help';
+                      document.querySelector('#message').value = 'Check the system service integration';
                       document.querySelector('#chat-form').requestSubmit();
                       await waitFor(() =>
                         sessionStorage.getItem('debian13.session.v1') &&
                         document.querySelectorAll('#chat-history li').length === 2 &&
-                        document.querySelector('#chat-result').textContent.includes('local_command')
+                        document.querySelector('#chat-result').textContent.includes('system_service') &&
+                        document.querySelector('#chat-result').textContent.includes('System service fixture')
                       );
                       const sessionId = sessionStorage.getItem('debian13.session.v1');
                       const roles = [...document.querySelectorAll('#chat-history strong')]
@@ -282,13 +294,23 @@ def run_e2e() -> None:
                         document.querySelector('#terminal-result').textContent.includes('restricted_terminal')
                       );
                       const terminal = document.querySelector('#terminal-result').textContent;
-                      return { agents, roles, terminal, sessionId };
+                      return {
+                        agents,
+                        roles,
+                        terminal,
+                        sessionId,
+                        chatResult: document.querySelector('#chat-result').textContent,
+                      };
                     })()"""
                 )
                 if result["roles"] != ["Ty · user", "astyria · assistant"]:
                     raise AssertionError(f"Unexpected agent session history: {result['roles']}")
                 if not result["terminal"].endswith("."):
                     raise AssertionError(f"Unexpected terminal output: {result['terminal']}")
+                if "system_service" not in result["chatResult"]:
+                    raise AssertionError("The browser UI did not receive the system-service chat result.")
+                if not system_service.requests or not system_service.requests[-1]["authorized"]:
+                    raise AssertionError("The system service did not receive its server-side bearer token.")
                 devtools.call("Page.reload", {"ignoreCache": True})
                 ready = False
                 deadline = time.monotonic() + 10
@@ -335,28 +357,35 @@ def run_e2e() -> None:
                 )
                 if restored["sessionId"] != result["sessionId"] or not restored["newSessionCleared"]:
                     raise AssertionError("Session restore or reset did not work in the UI.")
-                if "not_configured" not in restored["modelStatus"]:
-                    raise AssertionError("The UI did not report the model's real unavailable state.")
+                if "provider_configured" not in restored["modelStatus"]:
+                    raise AssertionError("The UI did not report the system-service provider status.")
                 if not desktop_layout_ok or not mobile_layout_ok:
                     raise AssertionError("The UI overflows or does not switch columns responsively.")
                 print(
-                    "PASS Debian 13 Chromium E2E over loopback HTTP: UI, four profiles, "
-                    "runtime diagnostics, SSE chat, terminal, session reload/reset, desktop and 320px layout; "
-                    "no model inference claimed."
+                    "PASS Debian 13 Chromium E2E over loopback HTTP: UI -> chat API -> "
+                    "authenticated system-service contract fixture, four profiles, diagnostics, SSE, "
+                    "terminal, session reload/reset, desktop and 320px layout; fixture is not model inference."
                 )
             finally:
                 if devtools:
                     devtools.close()
-                browser.terminate()
                 try:
-                    browser.wait(timeout=3)
+                    os.killpg(browser.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    browser.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    browser.kill()
-                    browser.wait(timeout=3)
+                    try:
+                        os.killpg(browser.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    browser.wait(timeout=5)
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+        stop_system_service(system_service, service_thread)
 
 
 if __name__ == "__main__":

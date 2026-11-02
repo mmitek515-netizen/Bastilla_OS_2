@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from model_adapter import MAX_MODEL_RESPONSE_BYTES, OllamaAdapter
+from system_service_adapter import SystemServiceAdapter
 
 API_VERSION = "v1"
 MAX_BODY_BYTES = 16_384
@@ -105,10 +106,18 @@ class DemoApplication:
     def __init__(
         self,
         workspace: Path = WORKSPACE,
-        model: OllamaAdapter | None = None,
+        model: OllamaAdapter | SystemServiceAdapter | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
-        self.model = model or OllamaAdapter.from_environment()
+        if model is not None:
+            self.model = model
+        elif (
+            os.environ.get("DEBIAN13_SYSTEM_API_URL")
+            or os.environ.get("DEBIAN13_SYSTEM_API_TOKEN")
+        ):
+            self.model = SystemServiceAdapter.from_environment()
+        else:
+            self.model = OllamaAdapter.from_environment()
         self._lock = threading.Lock()
         self._tasks: list[dict] = []
         self._events: list[dict] = []
@@ -209,7 +218,7 @@ class DemoApplication:
             return [
                 {"role": item["role"], "content": item["content"]}
                 for item in session["messages"]
-                if item["source"] == "ollama"
+                if item["source"] == getattr(self.model, "source", "ollama")
             ][-MAX_SESSION_MESSAGES:]
 
     def _event(self, event_type: str, agent: str, task_id: str) -> None:
@@ -333,7 +342,11 @@ class DemoApplication:
                 **profile,
                 "status": "profile_configured",
                 "worker": "not_running",
-                "model_backend": "shared_ollama_adapter",
+                "model_backend": (
+                    "system_service_adapter"
+                    if getattr(self.model, "source", None) == "system_service"
+                    else "shared_ollama_adapter"
+                ),
             }
             for agent_id, profile in AGENTS.items()
         ]
@@ -478,8 +491,12 @@ class Debian13Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "Wymagane są pola message i agent; opcjonalne pole to session_id."})
             return
         message, agent = payload["message"], payload["agent"]
-        if not isinstance(message, str) or not message.strip() or len(message) > MAX_MESSAGE_LENGTH:
-            self._send_json(400, {"error": f"Wiadomość musi zawierać 1–{MAX_MESSAGE_LENGTH} znaków."})
+        message_limit = min(
+            MAX_MESSAGE_LENGTH,
+            getattr(self.application.model, "max_message_length", MAX_MESSAGE_LENGTH),
+        )
+        if not isinstance(message, str) or not message.strip() or len(message) > message_limit:
+            self._send_json(400, {"error": f"Wiadomość musi zawierać 1–{message_limit} znaków."})
             return
         if not isinstance(agent, str) or agent not in AGENTS:
             self._send_json(400, {"error": "Nieznany profil agenta."})
@@ -531,7 +548,7 @@ class Debian13Handler(BaseHTTPRequestHandler):
                 self.application.update_task(task, "failed", error=public_error)
                 self._send_json(503, {"error": public_error, "task": task})
                 return
-            source = "ollama"
+            source = getattr(self.application.model, "source", "ollama")
 
         self.application.append_exchange(session, agent, message, reply, source)
         completed = self.application.update_task(task, "completed", result=reply)
@@ -549,7 +566,7 @@ class Debian13Handler(BaseHTTPRequestHandler):
     def _handle_stream_chat(self, session: dict, agent: str, message: str) -> None:
         task = self.application.start_task(agent, "chat")
         self.application.update_task(task, "running")
-        source = "ollama"
+        source = getattr(self.application.model, "source", "ollama")
         try:
             local_reply = self._local_reply(message)
             if local_reply is None:

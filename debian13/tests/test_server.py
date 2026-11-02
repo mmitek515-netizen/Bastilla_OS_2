@@ -10,8 +10,15 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from model_adapter import OllamaAdapter
+from system_service_adapter import SystemServiceAdapter
+from system_service_fixture import (
+    TEST_SERVICE_TOKEN,
+    start_system_service,
+    stop_system_service,
+)
 from server import (
     MAX_SESSION_BYTES,
     MAX_TASK_RESULT_BYTES,
@@ -408,6 +415,107 @@ class Debian13ApiTests(unittest.TestCase):
             self.assertEqual(status, 400)
         with self.assertRaises(ValueError):
             create_server(host="0.0.0.0", port=0)
+
+    def test_authenticated_system_service_adapter_integrates_api_chat_and_session_context(self):
+        service, service_thread, service_url = start_system_service()
+        self.app.model = SystemServiceAdapter(service_url, TEST_SERVICE_TOKEN)
+        try:
+            status, first = self.request(
+                "/api/v1/chat",
+                {"message": "Pierwsza wiadomość", "agent": "astyria"},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(first["source"], "system_service")
+            self.assertIn("System service fixture:", first["reply"])
+            self.assertEqual(service.requests[-1]["path"], "/v1/chat")
+            self.assertTrue(service.requests[-1]["authorized"])
+            self.assertEqual(service.requests[-1]["payload"]["profile"], "astyria")
+
+            status, second = self.request(
+                "/api/v1/chat",
+                {
+                    "message": "Kontynuacja",
+                    "agent": "astyria",
+                    "session_id": first["session_id"],
+                },
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(second["session_id"], first["session_id"])
+            self.assertIn("Pierwsza wiadomość", service.requests[-1]["payload"]["message"])
+            self.assertNotIn(TEST_SERVICE_TOKEN, json.dumps(first))
+            requests_before = len(service.requests)
+            status, _ = self.request(
+                "/api/v1/chat",
+                {"message": "x" * 4_001, "agent": "astyria"},
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(len(service.requests), requests_before)
+        finally:
+            stop_system_service(service, service_thread)
+
+    def test_system_service_refuses_missing_or_invalid_bearer_without_leaking_token(self):
+        service, service_thread, service_url = start_system_service()
+        try:
+            request = Request(
+                service_url + "/v1/chat",
+                data=json.dumps({"profile": "alex", "message": "hello"}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.assertRaises(HTTPError) as unauthenticated:
+                urlopen(request, timeout=3)
+            self.assertEqual(unauthenticated.exception.code, 401)
+            self.assertEqual(
+                json.loads(unauthenticated.exception.read())["error"]["code"],
+                "unauthorized",
+            )
+
+            wrong_token = "y" * 32
+            self.app.model = SystemServiceAdapter(service_url, wrong_token)
+            status, response = self.request(
+                "/api/v1/chat",
+                {"message": "hello", "agent": "alex"},
+            )
+            self.assertEqual(status, 503)
+            self.assertIn("authorization failed", response["error"])
+            self.assertNotIn(wrong_token, json.dumps(response))
+            self.assertFalse(service.requests[-1]["authorized"])
+
+            requests_before = len(service.requests)
+            self.app.model = SystemServiceAdapter(service_url, "")
+            status, response = self.request(
+                "/api/v1/chat",
+                {"message": "hello", "agent": "alex"},
+            )
+            self.assertEqual(status, 503)
+            self.assertIn("not configured", response["error"])
+            self.assertEqual(len(service.requests), requests_before)
+        finally:
+            stop_system_service(service, service_thread)
+
+
+class SystemServiceAdapterTests(unittest.TestCase):
+    def test_upstream_url_is_https_or_loopback_and_paths_are_fixed(self):
+        for url in [
+            "http://example.test:8080",
+            "http://127.0.0.1:8080/v1",
+            "https://user@example.test",
+            "https://example.test?route=/v1/chat",
+        ]:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                SystemServiceAdapter(url, TEST_SERVICE_TOKEN)
+
+        self.assertEqual(
+            SystemServiceAdapter("http://127.0.0.1:8080", TEST_SERVICE_TOKEN).base_url,
+            "http://127.0.0.1:8080",
+        )
+        self.assertEqual(
+            SystemServiceAdapter("https://system.example", TEST_SERVICE_TOKEN).base_url,
+            "https://system.example",
+        )
+        with self.assertRaisesRegex(RuntimeError, "route is not allowed"):
+            SystemServiceAdapter("https://system.example", TEST_SERVICE_TOKEN)._request_json(
+                "/v1/terminal"
+            )
 
 
 class OllamaAdapterTests(unittest.TestCase):
