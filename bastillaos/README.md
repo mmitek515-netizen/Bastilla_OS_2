@@ -59,15 +59,19 @@ Write the ISO to a USB drive with a trusted image writer, or attach it to an
 amd64 virtual machine configured for UEFI. Back up files before installation:
 installing an operating system can erase disk contents. Start the live session,
 review the installer partition choices, and explicitly select the target disk.
-The installed system starts the local SVL service as `root` so Triad agents can
-perform system-level changes. The root-privileged HTTP API is bound to
-`127.0.0.1:3000`; do not expose it to a network. Any local process that can
-reach this API can execute root commands. The desktop opens using Chromium.
+The installed system starts the local SVL service as the unprivileged
+`bastillaos` account. Terminal commands run with that account's permissions;
+they cannot elevate to root. systemd confines service writes to its state
+directory and applies additional sandboxing. The unauthenticated local HTTP API
+is bound to `127.0.0.1:3000`; do not expose it to a network. Any local process
+that can reach the API can execute commands as `bastillaos`. The desktop opens
+using Chromium.
 
 Configure `/etc/bastillaos/system.env` as a root-owned file (`chmod 0600`) and
-restart `bastillaos-svl-system` when setting optional runtime credentials. The
-service reads this file as root; never make it writable by the desktop user,
-and never put API secrets in a Git-tracked file or a public ISO. Optional
+restart `bastillaos-system` when setting optional runtime credentials. systemd
+loads this file before dropping service privileges; never make it writable by
+the desktop or service account, and never put API secrets in a Git-tracked file
+or a public ISO. Optional
 Pollinations credentials are used only by the image-generation endpoint. The
 service unit fixes its listener to `127.0.0.1:3000` after reading this file, so
 the bind address cannot be changed there.

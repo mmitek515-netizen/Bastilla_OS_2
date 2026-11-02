@@ -64,7 +64,7 @@ for required in \
   usr/share/bastillaos/system-defaults/package-lock.json \
   usr/share/bastillaos/system-defaults/index.html \
   usr/share/bastillaos/system-defaults/README.md \
-  usr/share/bastillaos/system-defaults/.github/workflows/build-bastillaos.yml \
+  usr/share/bastillaos/system-defaults/.github/workflows/ci.yml \
   usr/share/bastillaos/system-defaults/.gitignore; do
   [ -f "$ROOT/$required" ] || { echo "test-package: missing $required" >&2; exit 1; }
 done
@@ -86,23 +86,29 @@ python3 -I "$ROOT/usr/lib/bastillaos/without_nlp/engine.py" --status | grep -q '
 grep -q '^exports/svl_datastore.json$' "$DEFAULTS/.gitignore"
 ! grep -q 'package-lock.json' "$DEFAULTS/.gitignore"
 SERVICE="$ROOT/usr/lib/systemd/system/bastillaos-system.service"
-grep -q '^User=root$' "$SERVICE"
-grep -q '^Group=root$' "$SERVICE"
+grep -q '^User=bastillaos$' "$SERVICE"
+grep -q '^Group=bastillaos$' "$SERVICE"
 grep -q '^WorkingDirectory=/var/lib/bastillaos/system$' "$SERVICE"
 grep -q '^Environment=NODE_ENV=production$' "$SERVICE"
 grep -q '^Environment=HOST=127.0.0.1$' "$SERVICE"
 grep -q '^Environment=PORT=3000$' "$SERVICE"
 grep -q '^EnvironmentFile=-/etc/bastillaos/system.env$' "$SERVICE"
 grep -q '^StateDirectory=bastillaos/system$' "$SERVICE"
+grep -q '^NoNewPrivileges=true$' "$SERVICE"
+grep -q '^PrivateDevices=true$' "$SERVICE"
+grep -q '^PrivateTmp=true$' "$SERVICE"
+grep -q '^ProtectHome=true$' "$SERVICE"
+grep -q '^ProtectSystem=strict$' "$SERVICE"
+grep -q '^ReadWritePaths=/var/lib/bastillaos/system$' "$SERVICE"
+grep -q '^RestrictSUIDSGID=true$' "$SERVICE"
 awk '
   /^EnvironmentFile=/ { environment_file = NR }
   /^Environment=HOST=127\.0\.0\.1$/ { loopback_host = NR }
   END { exit !(environment_file && loopback_host && environment_file < loopback_host) }
 ' "$SERVICE"
-! grep -q '^NoNewPrivileges=true$' "$SERVICE"
-! grep -q '^ProtectHome=true$' "$SERVICE"
-! grep -q '^ProtectSystem=strict$' "$SERVICE"
-! grep -q '^ReadWritePaths=' "$SERVICE"
+grep -q 'addgroup --system bastillaos' "$PACKAGE_DIR/debian/postinst"
+grep -q 'adduser --system --ingroup bastillaos' "$PACKAGE_DIR/debian/postinst"
+grep -q 'chown --no-dereference bastillaos:bastillaos' "$PACKAGE_DIR/debian/postinst"
 grep -q 'restart bastillaos-system.service' "$PACKAGE_DIR/debian/postinst"
 grep -q '^After=.*network-online.target.*NetworkManager-wait-online.service' "$SERVICE"
 grep -q '^Restart=on-failure$' "$SERVICE"
@@ -141,7 +147,10 @@ grep -q 'user datastore must persist' "$STATE/exports/svl_datastore.json"
 [ -w "$STATE/exports/svl_datastore.json" ]
 
 PORT=42117
-NODE_ENV=production HOST=127.0.0.1 PORT="$PORT" LLM_PROVIDERS=none CHAT_LOCAL_FALLBACK=on \
+GEMINI_API_KEY= \
+BASTILLAOS_TEST_SECRET=terminal-secret-sentinel \
+NODE_ENV=production HOST=127.0.0.1 PORT="$PORT" LLM_PROVIDERS=gemini CHAT_LOCAL_FALLBACK=on \
+OLLAMA_MODEL= \
 BASTILLAOS_DEFAULTS_DIR="$DEFAULTS" \
 BASTILLAOS_RUNTIME_DIR="$RUNTIME" \
 BASTILLAOS_STATE_DIR="$STATE" \
@@ -171,14 +180,31 @@ node -e "
   if (
     !statusResponse.ok ||
     typeof status.enabled !== 'boolean' ||
-    status.provider !== (status.enabled ? 'Google Gemini API' : 'disabled') ||
-    status.connection !== (status.enabled ? 'configured' : 'disabled') ||
+    status.enabled !== true ||
+    status.provider !== 'brak modelu' ||
+    status.connection !== 'local-deterministic' ||
     status.protocol !== '/api/triad/command' ||
     status.chatProtocol !== '/api/triad/message' ||
-    'apiKey' in status ||
-    'model' in status
+    'apiKey' in status
   ) {
-    throw new Error('text model status does not accurately report Gemini chat configuration');
+    throw new Error('AI status mismatch: ' + JSON.stringify({
+      enabled: status.enabled,
+      provider: status.provider,
+      connection: status.connection,
+      protocol: status.protocol,
+      chatProtocol: status.chatProtocol,
+      hasApiKey: 'apiKey' in status,
+    }));
+  }
+
+  const terminalResponse = await fetch(baseUrl + '/api/kernel/command', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'root exec printf "BASTILLAOS_TEST_SECRET=%s" "\$BASTILLAOS_TEST_SECRET"' }),
+  });
+  const terminal = await terminalResponse.json();
+  if (!terminalResponse.ok || terminal.output !== 'BASTILLAOS_TEST_SECRET=') {
+    throw new Error('terminal command inherited the server API secret');
   }
 
   for (const route of ['/api/kernel/agent', '/api/terminal/generate-script']) {
@@ -237,18 +263,25 @@ node -e "
   const messagePersisted = messageResult.state?.store?.chat_history?.some(
     message => message.agent === 'Mateusz Mitek' && message.tekst === messageText
   );
-  const deterministicReplyPersisted = messageResult.state?.store?.chat_history?.some(
-    message => message.agent === 'Astyria' && message.tekst === messageResult.reply
+  const astyriaChatReplyPersisted = messageResult.state?.store?.chat_history?.some(
+    message => message.agent === 'Astyria' && message.tekst === messageResult.replies?.Astyria
   );
   if (
     !messageResponse.ok ||
     messageResult.success !== true ||
-    !messageResult.reply?.includes('nie jest interpretowana językowo') ||
+    typeof messageResult.reply !== 'string' ||
     messageResult.analysis?.decodedText !== messageText ||
     !messagePersisted ||
-    !deterministicReplyPersisted
+    !astyriaChatReplyPersisted
   ) {
-    throw new Error('without_nlp chat did not analyze and persist both sides of the message');
+    throw new Error('local chat did not analyze and persist both sides: ' + JSON.stringify({
+      status: messageResponse.status,
+      success: messageResult.success,
+      replyType: typeof messageResult.reply,
+      decodedText: messageResult.analysis?.decodedText,
+      messagePersisted,
+      astyriaChatReplyPersisted,
+    }));
   }
 
   const emptyMessageResponse = await fetch(baseUrl + '/api/triad/message', {

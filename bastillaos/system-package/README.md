@@ -20,16 +20,20 @@ one package to `OUTPUT_DIR`. The default is `bastillaos/build`. For example:
 OUTPUT_DIR="$HOME/debs" ./bastillaos/system-package/build-package.sh
 ```
 
-The systemd service runs as `root` so the Triad's `root exec` terminal can
-modify the installed BastillaOS system. It listens only on `127.0.0.1:3000`;
-do not expose this service to a network. Any local process that can reach its
-HTTP API can execute commands with root privileges. Its CWD is
+The systemd service runs as the dedicated, unprivileged `bastillaos` account.
+Terminal commands run with that account's permissions and cannot elevate to
+root. The service listens only on `127.0.0.1:3000`; do not expose this service
+to a network. Any local process that can reach its unauthenticated HTTP API can
+execute commands as `bastillaos`. systemd restricts service writes to
+`/var/lib/bastillaos/system` and applies additional sandboxing. Its CWD is
 `/var/lib/bastillaos/system`. On each start, the service helper copies only
 missing default files from
 `/usr/share/bastillaos/system-defaults`; existing datastore and application
-files are never replaced. The service has full host filesystem access.
+files are never replaced. The service can still read host files visible to its
+account; this sandbox is not a VM boundary. Terminal subprocesses receive a
+minimal environment and do not inherit API credentials.
 Optional API credentials belong in `/etc/bastillaos/system.env`, owned by root
-and not writable by the desktop user.
+with mode `0600` and not writable by the desktop or service account.
 Executable code and the generated frontend live under
 `/usr/lib/bastillaos/system`. No desktop launcher is included; KDE launcher
 integration belongs to the separate branding package.

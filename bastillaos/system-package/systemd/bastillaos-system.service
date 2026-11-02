@@ -5,8 +5,8 @@ After=network-online.target NetworkManager-wait-online.service
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=bastillaos
+Group=bastillaos
 WorkingDirectory=/var/lib/bastillaos/system
 StateDirectory=bastillaos/system
 StateDirectoryMode=0750
@@ -16,6 +16,17 @@ Environment=HOST=127.0.0.1
 Environment=PORT=3000
 Environment=HOME=/var/lib/bastillaos/system
 UMask=0027
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bastillaos/system
+RestrictSUIDSGID=true
 ExecStart=/usr/libexec/bastillaos/system-service
 Restart=on-failure
 RestartSec=5s

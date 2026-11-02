@@ -77,6 +77,12 @@ if (fs.existsSync('.env.local')) {
 }
 
 const execFileAsync = promisify(execFile);
+const terminalCommandEnv: NodeJS.ProcessEnv = {
+  HOME: process.env.HOME || '/nonexistent',
+  PATH: process.env.PATH || '/usr/bin:/bin',
+  ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
+  ...(process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {}),
+};
 const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite').trim();
 const GEMINI_FALLBACK_MODELS = process.env.GEMINI_FALLBACK_MODELS || 'gemini-3.8-flash,gemini-flash-latest,gemini-3.7-flash';
@@ -2367,7 +2373,11 @@ Plik został zapisany w katalogu /exports i jest natychmiast widoczny w zakładc
           const runCwd = appDir && fs.existsSync(path.join(APPS_DIR, appDir))
             ? path.join(APPS_DIR, appDir)
             : projectRoot;
-          const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], { cwd: runCwd, timeout: 10000 });
+          const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], {
+            cwd: runCwd,
+            env: terminalCommandEnv,
+            timeout: 10000,
+          });
           output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
           if (!output.trim()) output = '[Wykonano pomyślnie]';
         } catch (execErr: any) {
@@ -4163,7 +4173,10 @@ Możliwości Root:      EXEC_SHELL, MODIFY_CONFIG, MODIFY_FILES, HOT_PATCH_UI, D
           output = 'Użycie: root exec <komenda_powłoki>';
         } else {
           try {
-            const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], { timeout: 10000 });
+            const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], {
+              env: terminalCommandEnv,
+              timeout: 10000,
+            });
             output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
             if (!output.trim()) output = '[Polecenie wykonane bez wyjścia tekstowego]';
           } catch (execErr: any) {
@@ -4208,7 +4221,10 @@ Możliwości Root:      EXEC_SHELL, MODIFY_CONFIG, MODIFY_FILES, HOT_PATCH_UI, D
         output = 'Użycie: exec <komenda>';
       } else {
         try {
-          const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], { timeout: 10000 });
+          const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', shellCmd], {
+            env: terminalCommandEnv,
+            timeout: 10000,
+          });
           output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
           if (!output.trim()) output = '[Wykonano]';
         } catch (execErr: any) {
@@ -6629,5 +6645,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
 

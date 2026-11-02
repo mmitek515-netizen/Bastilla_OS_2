@@ -3,6 +3,16 @@ set -eu
 
 case "${1:-}" in
   configure)
+    if ! getent group bastillaos >/dev/null 2>&1; then
+      addgroup --system bastillaos
+    fi
+    if ! getent passwd bastillaos >/dev/null 2>&1; then
+      adduser --system --ingroup bastillaos --home /var/lib/bastillaos/system \
+        --no-create-home --shell /usr/sbin/nologin bastillaos
+    fi
+    install -d -o bastillaos -g bastillaos -m 0750 /var/lib/bastillaos/system
+    find /var/lib/bastillaos/system -xdev \
+      -exec chown --no-dereference bastillaos:bastillaos {} +
     if command -v deb-systemd-helper >/dev/null 2>&1; then
       deb-systemd-helper enable bastillaos-system.service >/dev/null || true
     fi

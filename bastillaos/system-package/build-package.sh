@@ -101,7 +101,7 @@ for required_file in \
   usr/share/bastillaos/system-defaults/.gitignore \
   usr/share/bastillaos/system-defaults/src/App.tsx \
   usr/share/bastillaos/system-defaults/apps/matrix-telemetry/app.json \
-  usr/share/bastillaos/system-defaults/.github/workflows/build-bastillaos.yml; do
+  usr/share/bastillaos/system-defaults/.github/workflows/ci.yml; do
   [[ -f "$VERIFY_DIR/$required_file" ]] || fail "built .deb is missing $required_file."
 done
 if find "$VERIFY_DIR/usr/share/bastillaos/system-defaults" \
