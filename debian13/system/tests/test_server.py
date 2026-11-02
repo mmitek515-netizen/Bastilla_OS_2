@@ -80,6 +80,7 @@ class Debian13ApiTests(unittest.TestCase):
 
     def test_diagnostics_are_authenticated_and_do_not_disclose_secrets(self):
         self.assertEqual(self.request_json("GET", "/v1/diagnostics", token=None)[0], 401)
+        self.assertEqual(self.request_json("GET", "/v1/diagnostics", token="invalid-token")[0], 401)
         self.server.config.update({
             "model_chat_url": "https://provider.example/v1/chat/completions",
             "model_api_key": "diagnostics-provider-secret",

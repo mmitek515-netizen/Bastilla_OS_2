@@ -77,6 +77,8 @@ curl --fail -H "Authorization: ******" \
 curl --fail -H "Authorization: ******" \
   -H 'Content-Type: application/json' \
   -d '{"command":"ls"}' http://127.0.0.1:8080/v1/terminal
+curl --fail -H "Authorization: ******" \
+  http://127.0.0.1:8080/v1/diagnostics
 ```
 
 Stop the service with `docker compose -f compose.yaml down`. The named workspace

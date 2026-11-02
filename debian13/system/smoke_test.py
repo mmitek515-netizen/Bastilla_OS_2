@@ -111,6 +111,8 @@ def main() -> None:
             base_url, "/v1/terminal", token="invalid-token", body={"command": "pwd"}
         )
         assert status == 401, f"Invalid bearer token returned HTTP {status}."
+        status, _, _ = request_json(base_url, "/v1/diagnostics", token="invalid-token")
+        assert status == 401, f"Invalid bearer token returned diagnostics HTTP {status}."
 
         status, profiles, _ = request_json(base_url, "/v1/profiles", TOKEN)
         assert status == 200 and len(profiles["profiles"]) == 4
