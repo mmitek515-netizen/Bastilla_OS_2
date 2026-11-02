@@ -1,0 +1,9 @@
+{
+  "name": "debian13-chat",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node ./chat/demo.mjs",
+    "test": "node --test ./chat/*.test.mjs"
+  }
+}
