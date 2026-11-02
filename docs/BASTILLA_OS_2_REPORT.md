@@ -1,5 +1,20 @@
 # Raport Bastilla OS 2 — 2026-11-01
 
+## Aktualizacja 2026-11-02
+
+- Odpowiedzi modelu nie wykonują poleceń powłoki ani nie zatwierdzają samodzielnie zmian. Obsługiwane propozycje trafiają do kolejki z limitem i wygasaniem; wykonanie wymaga decyzji operatora w widoku akceptacji. Propozycje tekstowe nie są dowodem wykonania.
+- Serwer domyślnie nasłuchuje na `127.0.0.1`; `HOST` pozwala jawnie zmienić adres. Nie jest to pełne uwierzytelnianie API — pozostaw port prywatny albo użyj uwierzytelnionego proxy.
+- `npm ci` na Node.js 24.12.0: zainstalowano 317 pakietów; npm zgłosił 4 podatności wysokiego poziomu w zależnościach.
+- `npm run verify`: PASS — 94/94 testów, TypeScript, build UI i build serwera. Build UI nadal ostrzega o dużym bundlu (1,855.30 kB przed gzip).
+- `npm run check:api -- http://127.0.0.1:3000`: PASS — pięć kontrolowanych punktów API odpowiadało. Ollama była offline; kontrola nie potwierdza inferencji ani połączenia ChatGPT.
+- Sprawdzono rzeczywisty listener `127.0.0.1:3000`. Nie uruchamiano CI GitHub, przeglądarkowych E2E ani bootowania Debian/QEMU.
+
+### Nadal poza zakresem tej aktualizacji
+
+- Czat nadal zwraca pełną odpowiedź JSON; nie dodano streamingu ani odrębnych sesji użytkowników.
+- Pełny audyt uwierzytelniania pozostałych endpointów zapisu i testy HTTP odmowy dostępu są nadal wymagane przed publicznym wystawieniem serwera.
+- Nie potwierdzono działającego modelu AI, handshake MCP z zewnętrznym klientem, budowy ISO ani uruchomienia VM.
+
 ## Wykonano
 
 - Odtworzono 225 plików źródłowych z commit `2203ac94b1dbbad0f9e2a470c00a4b24bc9900ed`.
