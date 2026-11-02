@@ -124,21 +124,67 @@ async function request(base, path, { method = 'GET', body, token: bearer = autho
   return { status: response.status, body: await response.json() };
 }
 
-test('API v1 endpoints deny requests without an operator bearer token', async (t) => {
+function sseData(stream, eventName) {
+  const frame = stream.split('\n\n').find((item) =>
+    item.split('\n').includes(`event: ${eventName}`));
+  assert.ok(frame, `missing SSE event: ${eventName}`);
+  const data = frame.split('\n').find((line) => line.startsWith('data: '));
+  assert.ok(data, `missing SSE data: ${eventName}`);
+  return JSON.parse(data.slice('data: '.length));
+}
+
+test('every API v1 route denies missing or invalid operator authorization', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const { server, base } = await startServer(join(directory, 'state.json'));
+  const { server, base, store } = await startServer(join(directory, 'state.json'));
   t.after(() => stopServer(server));
 
-  assert.equal((await request(base, '/api/v1/status', { token: '' })).status, 401);
-  const chat = await request(base, '/api/v1/chat', {
-    method: 'POST',
-    body: { message: 'hello', agent: 'astyria' },
-    token: '',
-  });
-  assert.equal(chat.status, 401);
-  const queue = await request(base, '/api/v1/operations', { token: '' });
-  assert.equal(queue.status, 401);
+  const sessionId = '00000000-0000-4000-8000-000000000001';
+  const taskId = '00000000-0000-4000-8000-000000000002';
+  const routes = [
+    { path: '/api/v1/status' },
+    { path: '/api/v1/agents' },
+    { path: '/api/v1/tasks' },
+    { path: `/api/v1/tasks/${taskId}` },
+    { path: '/api/v1/events' },
+    { path: '/api/v1/operations' },
+    { path: '/api/v1/operations/audit' },
+    { path: `/api/v1/sessions/${sessionId}/messages` },
+    {
+      path: '/api/v1/chat',
+      method: 'POST',
+      body: { message: 'hello', agent: 'astyria' },
+    },
+    {
+      path: '/api/v1/chat/stream',
+      method: 'POST',
+      body: { message: 'hello', agent: 'astyria' },
+    },
+    {
+      path: '/api/v1/terminal',
+      method: 'POST',
+      body: { command: 'pwd' },
+    },
+    {
+      path: `/api/v1/operations/${taskId}/decision`,
+      method: 'POST',
+      body: { decision: 'approve', expected_version: 1 },
+    },
+    { path: `/api/v1/tasks/${taskId}/cancel`, method: 'POST' },
+  ];
+  const initialState = store.read();
+
+  for (const route of routes) {
+    for (const bearer of ['', ['Bear', 'er invalid'].join('')]) {
+      const response = await request(base, route.path, {
+        ...route,
+        token: bearer,
+      });
+      assert.equal(response.status, 401, `${route.method || 'GET'} ${route.path}`);
+      assert.deepEqual(response.body, { error: 'unauthorized' });
+    }
+  }
+  assert.deepEqual(store.read(), initialState);
 });
 
 test('API server listen enforces a loopback TCP bind', async (t) => {
@@ -171,6 +217,26 @@ test('operator decisions require authorization, persist, and never execute propo
   assert.equal(proposed.status, 200);
   assert.equal(proposed.body.operation.status, 'pending_approval');
   const id = proposed.body.operation.id;
+  assert.deepEqual(Object.keys(proposed.body.operation).sort(), [
+    'createdAt',
+    'expiresAt',
+    'id',
+    'operation',
+    'risk',
+    'status',
+    'version',
+  ]);
+  for (const body of [
+    { decision: 'approve' },
+    { decision: 'approve', expected_version: 1, unexpected: true },
+  ]) {
+    const invalid = await request(running.base, `/api/v1/operations/${id}/decision`, {
+      method: 'POST',
+      body,
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.body.error, 'invalid_decision_request');
+  }
   const decisionBody = { decision: 'approve', expected_version: 1 };
 
   const denied = await request(running.base, `/api/v1/operations/${id}/decision`, {
@@ -188,6 +254,16 @@ test('operator decisions require authorization, persist, and never execute propo
   assert.equal(approved.status, 200);
   assert.equal(approved.body.operation.status, 'approved');
   assert.equal(approved.body.operation.version, 2);
+  assert.deepEqual(Object.keys(approved.body.operation).sort(), [
+    'createdAt',
+    'decidedAt',
+    'expiresAt',
+    'id',
+    'operation',
+    'risk',
+    'status',
+    'version',
+  ]);
 
   await stopServer(running.server);
   running = await startServer(path);
@@ -203,6 +279,8 @@ test('operator decisions require authorization, persist, and never execute propo
     'operation.proposed',
     'operation.approved',
   ]);
+  assert.ok(audit.body.events.every((event) =>
+    Object.keys(event).sort().join(',') === 'at,operation_id,type'));
   assert.equal(JSON.stringify(audit.body).includes(token), false);
 });
 
@@ -287,12 +365,35 @@ test('authorized task lookup returns persisted Work status after reconnect', asy
   assert.equal(first.body.task.status, 'completed');
   assert.equal(first.body.task.result, 'answer-1');
   assert.equal(first.body.task.id, taskId);
+  assert.deepEqual(Object.keys(first.body.task).sort(), [
+    'agent',
+    'created_at',
+    'error',
+    'id',
+    'kind',
+    'result',
+    'status',
+    'updated_at',
+  ]);
+  const firstEvents = await request(running.base, '/api/v1/events');
+  assert.deepEqual(firstEvents.body.events.map(({ type }) => type), [
+    'task.completed',
+    'task.running',
+    'task.queued',
+  ]);
+  assert.ok(firstEvents.body.events.every((event) =>
+    Object.keys(event).sort().join(',') === 'agent,at,task_id,type'));
+  assert.ok(firstEvents.body.events.every((event) => event.task_id === taskId));
 
   await stopServer(running.server);
   running = await startServer(path);
   const reconnected = await request(running.base, `/api/v1/tasks/${taskId}`);
   assert.equal(reconnected.status, 200);
   assert.deepEqual(reconnected.body, first.body);
+  assert.deepEqual(
+    (await request(running.base, '/api/v1/events')).body,
+    firstEvents.body,
+  );
 
   const missing = await request(
     running.base,
@@ -365,9 +466,9 @@ test('authorized streamed chat cancellation is delivered and persists across rec
   const first = await reader.read();
   const metadata = new TextDecoder().decode(first.value);
   assert.match(metadata, /event: meta/);
-  const { session_id: sessionId, task_id: taskId } = JSON.parse(
-    metadata.match(/data: (.+)/)[1],
-  );
+  const meta = sseData(metadata, 'meta');
+  assert.deepEqual(Object.keys(meta).sort(), ['session_id', 'task_id']);
+  const { session_id: sessionId, task_id: taskId } = meta;
   assert.ok(sessionId);
   assert.ok(taskId);
 
@@ -378,11 +479,31 @@ test('authorized streamed chat cancellation is delivered and persists across rec
   assert.equal(denied.status, 401);
   assert.equal(model.signal.aborted, false);
 
+  const requestBodyRejected = await request(
+    running.base,
+    `/api/v1/tasks/${taskId}/cancel`,
+    { method: 'POST', body: {} },
+  );
+  assert.equal(requestBodyRejected.status, 400);
+  assert.equal(requestBodyRejected.body.error, 'invalid_cancel_request');
+  assert.equal(model.signal.aborted, false);
+
   const cancellation = await request(running.base, `/api/v1/tasks/${taskId}/cancel`, {
     method: 'POST',
   });
   assert.equal(cancellation.status, 202);
   assert.equal(cancellation.body.task.status, 'cancel_requested');
+  assert.deepEqual(Object.keys(cancellation.body), ['task']);
+  assert.deepEqual(Object.keys(cancellation.body.task).sort(), [
+    'agent',
+    'created_at',
+    'error',
+    'id',
+    'kind',
+    'result',
+    'status',
+    'updated_at',
+  ]);
   assert.equal(model.signal.aborted, true);
 
   let remaining = '';
@@ -391,11 +512,29 @@ test('authorized streamed chat cancellation is delivered and persists across rec
     if (done) break;
     remaining += new TextDecoder().decode(value);
   }
-  assert.match(remaining, /event: cancelled/);
+  const cancelledEvent = sseData(remaining, 'cancelled');
+  assert.deepEqual(Object.keys(cancelledEvent).sort(), ['error', 'task']);
+  assert.equal(cancelledEvent.error, 'request_cancelled');
+  assert.equal(cancelledEvent.task.status, 'cancelled');
+  assert.deepEqual(Object.keys(cancelledEvent.task).sort(), [
+    'agent',
+    'created_at',
+    'error',
+    'id',
+    'kind',
+    'result',
+    'status',
+    'updated_at',
+  ]);
 
   const task = await request(running.base, `/api/v1/tasks/${taskId}`);
   assert.equal(task.body.task.status, 'cancelled');
   assert.equal(task.body.task.error, 'request_cancelled');
+  assert.equal(task.body.task.id, cancelledEvent.task.id);
+  assert.equal(task.body.task.status, cancelledEvent.task.status);
+  assert.equal(task.body.task.result, cancelledEvent.task.result);
+  assert.equal(task.body.task.error, cancelledEvent.task.error);
+  assert.ok(Number.isFinite(Date.parse(task.body.task.updated_at)));
   const history = await request(running.base, `/api/v1/sessions/${sessionId}/messages`);
   assert.deepEqual(history.body.messages.map(({ role }) => role), ['user', 'assistant']);
   assert.equal(history.body.messages[1].source, 'cancelled');
@@ -581,6 +720,13 @@ test('API v1 streaming emits the documented session and task events', async (t) 
   assert.match(stream, /event: meta/);
   assert.match(stream, /event: delta/);
   assert.match(stream, /event: done/);
+  const meta = sseData(stream, 'meta');
+  const done = sseData(stream, 'done');
+  const delta = sseData(stream, 'delta');
+  assert.deepEqual(Object.keys(meta).sort(), ['session_id', 'task_id']);
+  assert.deepEqual(Object.keys(delta), ['text']);
+  assert.deepEqual(Object.keys(done).sort(), ['agent', 'session_id', 'source', 'task']);
+  assert.deepEqual(Object.keys(done.task).sort(), ['id', 'status']);
 });
 
 test('SSE sends session metadata before model generation completes', async (t) => {
