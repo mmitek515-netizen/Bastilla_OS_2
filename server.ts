@@ -6365,6 +6365,9 @@ const agentTaskDecisionRateLimit = rateLimit({
   message: { success: false, error: 'Za dużo decyzji dotyczących zadań. Spróbuj ponownie za chwilę.' },
 });
 
+app.use('/api/agent-tasks/:id/approve', requireAgentTasksAuthorization, agentTaskDecisionRateLimit);
+app.use('/api/agent-tasks/:id/retry', requireAgentTasksAuthorization, agentTaskDecisionRateLimit);
+
 app.get('/api/agent-tasks', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   return res.json({
@@ -6450,7 +6453,7 @@ app.post('/api/agent-tasks/cancel', (req, res) => {
   return res.json({ success });
 });
 
-app.post('/api/agent-tasks/:id/approve', requireAgentTasksAuthorization, agentTaskDecisionRateLimit, (req, res) => {
+app.post('/api/agent-tasks/:id/approve', (req, res) => {
   const success = agentTaskRegistry.approve(req.params.id);
   return res.status(success ? 200 : 409).json({
     success,
@@ -6458,7 +6461,7 @@ app.post('/api/agent-tasks/:id/approve', requireAgentTasksAuthorization, agentTa
   });
 });
 
-app.post('/api/agent-tasks/:id/retry', requireAgentTasksAuthorization, agentTaskDecisionRateLimit, (req, res) => {
+app.post('/api/agent-tasks/:id/retry', (req, res) => {
   const success = agentTaskRegistry.retry(req.params.id);
   return res.status(success ? 200 : 409).json({
     success,
