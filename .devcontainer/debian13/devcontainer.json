@@ -10,14 +10,16 @@
     },
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "postCreateCommand": "if [ -f package-lock.json ]; then npm ci; fi",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}/debian13",
+  "postCreateCommand": "if [ -f package-lock.json ]; then npm ci; else echo 'Debian 13 workspace ready; no standalone Node package yet.'; fi",
   "forwardPorts": [
     3000
   ],
   "portsAttributes": {
     "3000": {
       "label": "Debian 13 development preview",
-      "onAutoForward": "notify"
+      "onAutoForward": "notify",
+      "visibility": "private"
     }
   },
   "customizations": {
