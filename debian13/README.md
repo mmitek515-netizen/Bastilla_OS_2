@@ -1,19 +1,29 @@
-# Nowy interfejs Debian 13
+# Debian 13 — niezależny interfejs
 
-Pierwszy etap oddzielnego interfejsu dla nowego systemu Debian 13 znajduje się
-w [`ui/`](ui/). Nie jest to rozwinięcie starego dashboardu BastillaOS i nie
-potwierdza bootowania ani instalacji Debiana.
+Interfejs w [`ui/`](ui/) łączy się z wersjonowanym API Debian 13 v1, bez
+korzystania z API starszej aplikacji Bastilla OS 2. Kontrakt backendu jest
+zdefiniowany w PR #97, commit
+[`7673119`](https://github.com/mmitek515-netizen/Bastilla_OS_2/commit/767311930dab4a36e53ff6bc2425a5e130b787fa);
+ten etap nie kopiuje ani nie zmienia jego plików backendu.
 
 ## Uruchomienie
 
-Z katalogu głównego repozytorium:
+Uruchom zgodny backend API na `127.0.0.1:8765` (źródło z powyższego commita
+udostępnia `python3 debian13/server.py`), a następnie z katalogu repozytorium:
 
 ```sh
 npm run dev:debian13-ui
 ```
 
-Serwer statyczny wiąże się wyłącznie z `127.0.0.1:4174`; otwórz
-`http://127.0.0.1:4174`.
+Otwórz `http://127.0.0.1:4174`. UI i serwer pośredniczący wiążą się wyłącznie z
+loopbackiem. Serwer pośredniczy tylko w pięciu endpointach UI i nie zastępuje
+ani nie implementuje API. Dla wdrożenia UI i API muszą być na tym samym originie
+albo za zaufanym reverse proxy przekazującym te ścieżki.
+
+UI pobiera `GET /api/v1/status`, `/agents` i `/tasks`, wysyła
+`POST /api/v1/chat` z `{message, agent}` oraz `/terminal` z `{command}`.
+Wyświetla rzeczywiste błędy API, rozróżnia status skonfigurowanego profilu od
+statusu workera i nie zastępuje błędu 503 odpowiedzią pozorną.
 
 ## Testy
 
@@ -21,19 +31,20 @@ Serwer statyczny wiąże się wyłącznie z `127.0.0.1:4174`; otwórz
 npm run test:debian13-ui
 ```
 
-Sprawdzono dodatkowo Chromium 156 przy 320×780, 360×800, 412×915 i 1440×900:
-widok terminala, czatu oraz czterech profili był widoczny bez poziomego
-przewijania. Formularze nie wysyłają ani nie wykonują poleceń, a test
-przeglądarkowy nie wykrył żądań API.
+Testy HTTP używają jawnie oznaczonego lokalnego test-double i sprawdzają `/help`,
+dozwolone `pwd`, odrzucone `id` oraz HTTP 503 bez modelu. Dodatkowo interfejs
+sprawdzono z backendem pobranym tymczasowo z przypiętego commita PR #97:
+`/help` i `pwd` zwróciły HTTP 200, `id` HTTP 400, a zwykła wiadomość HTTP 503
+bez wygenerowanej odpowiedzi. Test nie konfigurował ani nie uruchamiał modelu.
 
-## Granice obecnego etapu
+Chromium 156: formularze czatu i terminala, status API i cztery profile działały
+przy szerokościach 320, 360, 412 i 1440 px; `scrollWidth` równał się
+`clientWidth` w każdym widoku.
 
-- Brak uzgodnionego API/runtime dla nowego systemu. Nie podłączono istniejących
-  endpointów Bastilla ani skryptów QEMU.
-- Profile Aria, Astyria, Aurelius i Alex mają status `Niepodłączony`; nie
-  potwierdzono żadnego aktywnego wykonawcy AI.
-- Czat i terminal są interfejsem szkiców, bez inferencji, powłoki, historii ani
-  trwałego przechowywania.
+## Niewykonane
+
 - Nie przygotowano ISO, VM ani bootu Debian 13; nie uruchomiono MCP ani AI Studio.
-- Nie uruchomiono usług płatnych i nie dokonano zakupów. Wymagana jest osobna
-  uprzednia akceptacja konkretnego wydatku.
+- Cztery role to profile; backend v1 jawnie raportuje workery jako
+  `not_running`. Nie uruchomiono czterech procesów agentów.
+- Nie uruchomiono płatnych usług ani nie dokonano zakupów. Każdy wydatek wymaga
+  osobnej uprzedniej akceptacji.

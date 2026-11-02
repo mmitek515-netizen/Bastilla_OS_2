@@ -9,6 +9,7 @@
       content="Niezależny interfejs roboczy terminala i czatu dla nowego systemu Debian 13."
     />
     <title>Debian 13 · Console</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
     <script type="module" src="./app.mjs"></script>
   </head>
@@ -22,9 +23,9 @@
             <span class="brand-subtitle">Console · nowy system</span>
           </span>
         </a>
-        <div class="runtime-pill" role="status" aria-live="polite">
+        <div id="connection-status" class="runtime-pill" role="status" aria-live="polite">
           <span class="status-dot" aria-hidden="true"></span>
-          <span>Runtime niepodłączony</span>
+          <span>Łączenie z runtime…</span>
         </div>
       </header>
 
@@ -32,10 +33,24 @@
         <section class="intro" aria-labelledby="page-title">
           <p class="eyebrow">ŚRODOWISKO ROBOCZE · ETAP UI</p>
           <h1 id="page-title">Terminal i czat</h1>
-          <p>
-            Osobny interfejs nowego systemu. Wpisy są lokalnymi szkicami — bez
-            połączenia z runtime nic nie jest wysyłane ani wykonywane.
-          </p>
+          <p>Osobny interfejs nowego systemu. Czat i ograniczony terminal łączą się z API Debian 13.</p>
+        </section>
+
+        <section class="panel status-panel" aria-labelledby="runtime-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">RZECZYWISTY STAN API</p>
+              <h2 id="runtime-title">Status systemu</h2>
+            </div>
+            <button id="refresh-status" class="button button-secondary" type="button">Odśwież</button>
+          </div>
+          <dl id="runtime-details" class="runtime-grid" aria-live="polite">
+            <div><dt>Aplikacja</dt><dd id="application-status">Ładowanie…</dd></div>
+            <div><dt>System operacyjny</dt><dd id="os-status">Ładowanie…</dd></div>
+            <div><dt>Model</dt><dd id="model-status">Ładowanie…</dd></div>
+            <div><dt>Zadania w pamięci</dt><dd id="task-storage-status">Ładowanie…</dd></div>
+          </dl>
+          <p id="status-error" class="status-error" aria-live="polite"></p>
         </section>
 
         <section class="agent-panel panel" aria-labelledby="agents-title">
@@ -44,9 +59,10 @@
               <p class="eyebrow">PROFILE</p>
               <h2 id="agents-title">Agenci</h2>
             </div>
-            <span class="muted-count">4 profile · stan nieznany</span>
+            <span id="agent-count" class="muted-count">Ładowanie profili…</span>
           </div>
-          <ul id="agent-list" class="agent-grid" aria-label="Statusy profili agentów"></ul>
+          <p id="agent-error" class="status-error" aria-live="polite"></p>
+          <ul id="agent-list" class="agent-grid" aria-label="Statusy profili i workerów"></ul>
         </section>
 
         <div class="workspace-grid">
@@ -64,10 +80,10 @@
                 <option value="alex">Alex</option>
               </select>
             </div>
-            <div class="transcript" aria-label="Szkic rozmowy">
+            <div id="chat-transcript" class="transcript" aria-label="Rozmowa" aria-live="polite">
               <p class="empty-state">
-                Wybierz profil i przygotuj wiadomość. Odpowiedź pojawi się dopiero
-                po podłączeniu rzeczywistego wykonawcy.
+                Wybierz profil i wyślij wiadomość. Polecenie /help działa lokalnie;
+                pozostałe wiadomości wymagają dostępnego modelu.
               </p>
             </div>
             <form id="chat-form" class="composer">
@@ -76,15 +92,15 @@
                 id="chat-message"
                 name="message"
                 rows="3"
-                maxlength="4000"
-                placeholder="Napisz szkic wiadomości…"
+                maxlength="12000"
+                placeholder="Napisz wiadomość…"
                 required
               ></textarea>
               <div class="form-footer">
                 <p id="chat-feedback" class="form-feedback" aria-live="polite">
-                  Wiadomość nie zostanie wysłana — brak runtime.
+                  Wiadomość zostanie wysłana po połączeniu z API.
                 </p>
-                <button type="submit" class="button button-primary">Wyślij</button>
+                <button id="chat-submit" type="submit" class="button button-primary">Wyślij</button>
               </div>
             </form>
           </section>
@@ -95,11 +111,10 @@
                 <p class="eyebrow">POLECENIA</p>
                 <h2 id="terminal-title">Terminal</h2>
               </div>
-              <span class="local-badge">bez powłoki</span>
+              <span class="local-badge">dozwolone: pwd, ls, cat</span>
             </div>
-            <div class="terminal-output" aria-label="Wynik terminala" aria-live="polite">
-              <p><span class="prompt-mark" aria-hidden="true">$</span> Runtime systemu niepodłączony.</p>
-              <p class="terminal-hint">Polecenia nie są obecnie wykonywane.</p>
+            <div id="terminal-output" class="terminal-output" aria-label="Wynik terminala" aria-live="polite">
+              <p class="terminal-hint">Ograniczone polecenia są obsługiwane przez API, bez uruchamiania powłoki.</p>
             </div>
             <form id="terminal-form" class="composer terminal-composer">
               <label for="terminal-command">Polecenie</label>
@@ -107,21 +122,35 @@
                 id="terminal-command"
                 name="command"
                 type="text"
-                maxlength="1000"
+                maxlength="500"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="Wpisz polecenie jako szkic…"
+                placeholder="np. pwd"
                 required
               />
               <div class="form-footer">
                 <p id="terminal-feedback" class="form-feedback" aria-live="polite">
-                  Brak runtime — powłoka jest niedostępna.
+                  Obsługiwane są tylko pwd, ls i cat <plik> w katalogu roboczym.
                 </p>
-                <button type="submit" class="button button-secondary">Uruchom</button>
+                <button id="terminal-submit" type="submit" class="button button-secondary">Uruchom</button>
               </div>
             </form>
           </section>
         </div>
+
+        <section class="panel tasks-panel" aria-labelledby="tasks-title">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">PAMIĘĆ PROCESU</p>
+              <h2 id="tasks-title">Ostatnie zadania</h2>
+            </div>
+            <span id="tasks-count" class="muted-count">Ładowanie…</span>
+          </div>
+          <p id="tasks-error" class="status-error" aria-live="polite"></p>
+          <ul id="task-list" class="task-list" aria-live="polite">
+            <li class="empty-state">Pobieranie zadań…</li>
+          </ul>
+        </section>
       </main>
 
       <footer class="footer">
