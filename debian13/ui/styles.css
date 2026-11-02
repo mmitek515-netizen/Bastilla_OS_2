@@ -715,6 +715,7 @@ h2 {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 9px 10px;
   border: 1px solid rgb(145 161 181 / 14%);
@@ -727,6 +728,34 @@ h2 {
 .task-state {
   flex: 0 0 auto;
   color: var(--muted);
+}
+
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.task-action {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid rgb(145 161 181 / 24%);
+  border-radius: 7px;
+  background: transparent;
+  color: #cbd6e3;
+  font: inherit;
+  cursor: pointer;
+}
+
+.task-action:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.task-cancel {
+  border-color: rgb(255 154 159 / 42%);
+  color: #ffb6ba;
 }
 
 .task-completed {

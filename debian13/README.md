@@ -19,6 +19,10 @@ Otwórz `http://127.0.0.1:4174`. UI i serwer pośredniczący wiążą się wył�
 loopbackiem. Serwer pośredniczy wyłącznie w jawnie dozwolonych trasach UI i nie zastępuje
 ani nie implementuje API. Dla wdrożenia UI i API muszą być na tym samym originie
 albo za zaufanym reverse proxy przekazującym te ścieżki.
+Dla oddzielnego, uwierzytelnionego API czatu z PR #95 proxy może dodać token
+operatora skonfigurowany wyłącznie po stronie serwera przez `DEBIAN13_API_TOKEN`.
+Nie umieszczaj tokenu w przeglądarce ani wiadomości czatu; zmienna pozostaje
+pusta dla demonstracyjnego API z PR #97.
 
 UI pobiera status, profile, zadania i zdarzenia z `GET /api/v1/status`,
 `/agents`, `/tasks` i `/events`. Work pokazuje rzeczywiste, ograniczone zdarzenia
@@ -40,6 +44,13 @@ grupowe „Wszyscy” jest wyłączone, ponieważ kontrakt nie obsługuje broadc
 Profile agentów nie oznaczają aktywnych workerów. UI pokazuje błędy API i nie
 zastępuje braku modelu odpowiedzią pozorną.
 
+Work może odświeżyć status pojedynczego zadania i zażądać anulowania wyłącznie,
+gdy backend udostępnia `GET /api/v1/tasks/{uuid}` oraz beztreściowe
+`POST /api/v1/tasks/{uuid}/cancel` z PR #95. Pythonowe demo PR #97 nie ma tych
+tras; UI zgłasza wtedy brak endpointu i nie twierdzi, że zadanie anulowano.
+Lokalne zatrzymanie strumienia SSE również nie jest potwierdzeniem anulowania
+po stronie serwera.
+
 ## Testy
 
 ```sh
@@ -47,9 +58,10 @@ npm run test:debian13-ui
 ```
 
 Testy HTTP używają jawnie oznaczonego lokalnego test-double i sprawdzają
-przekazywanie SSE bez buforowania, historię, zdarzenia zadań, dozwolone `pwd`,
-odrzucone `id`, limit body oraz HTTP 503 bez modelu. Test-double nie jest dowodem aktywnego
-modelu ani workera.
+przekazywanie SSE bez buforowania, historię, reconnect/anulowanie zadań,
+serwerowe przekazywanie autoryzacji, dozwolone `pwd`, odrzucone `id`, limit
+body oraz HTTP 503 bez modelu. Test-double nie jest dowodem aktywnego modelu
+ani workera.
 
 Rzeczywisty przegląd UI wykonano w Chromium 156.0.8078.0 z przypiętym backendem
 `664b7b6`, bez skonfigurowanego modelu. Poziomy overflow nie wystąpił, a

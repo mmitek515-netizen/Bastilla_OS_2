@@ -21,6 +21,12 @@ API_PATHS = {
     ("POST", "/api/v1/chat/stream"),
     ("POST", "/api/v1/terminal"),
 }
+API_TASK_PATH = re.compile(
+    r"/api/v1/tasks/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+)
+API_TASK_CANCEL_PATH = re.compile(
+    r"/api/v1/tasks/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/cancel",
+)
 API_SESSION_PATH = re.compile(
     r"/api/v1/sessions/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/messages",
 )
@@ -55,23 +61,34 @@ class UiHandler(SimpleHTTPRequestHandler):
     def _proxy_api(self) -> None:
         path = urlsplit(self.path).path
         if (self.command, path) not in API_PATHS and not (
-            self.command == "GET" and API_SESSION_PATH.fullmatch(path)
+            self.command == "GET" and (API_SESSION_PATH.fullmatch(path) or API_TASK_PATH.fullmatch(path))
+        ) and not (
+            self.command == "POST" and API_TASK_CANCEL_PATH.fullmatch(path)
         ):
             self._send_error_json(404, "Nie znaleziono endpointu API.")
             return
 
-        body = b""
+        body = None
         if self.command == "POST":
+            if self.headers.get("Transfer-Encoding"):
+                self._send_error_json(400, "Kodowanie transferu nie jest obsługiwane.")
+                return
             raw_length = self.headers.get("Content-Length", "")
-            try:
-                length = int(raw_length)
-            except ValueError:
-                self._send_error_json(400, "Nieprawidłowy Content-Length.")
-                return
-            if length < 1 or length > MAX_PROXY_BODY_BYTES:
-                self._send_error_json(413, "Żądanie przekracza limit rozmiaru.")
-                return
-            body = self.rfile.read(length)
+            if API_TASK_CANCEL_PATH.fullmatch(path):
+                if raw_length not in ("", "0"):
+                    self._send_error_json(400, "Anulowanie zadania nie przyjmuje treści.")
+                    return
+                body = None
+            else:
+                try:
+                    length = int(raw_length)
+                except ValueError:
+                    self._send_error_json(400, "Nieprawidłowy Content-Length.")
+                    return
+                if length < 1 or length > MAX_PROXY_BODY_BYTES:
+                    self._send_error_json(413, "Żądanie przekracza limit rozmiaru.")
+                    return
+                body = self.rfile.read(length)
 
         try:
             api_port = int(os.environ.get("DEBIAN13_API_PORT", "8765"))
@@ -80,7 +97,12 @@ class UiHandler(SimpleHTTPRequestHandler):
             timeout = MAX_STREAM_SECONDS if path == API_STREAM_PATH else 5
             connection = http.client.HTTPConnection("127.0.0.1", api_port, timeout=timeout)
             headers = {}
-            if self.command == "POST":
+            token = os.environ.get("DEBIAN13_API_TOKEN", "")
+            if token:
+                if any(ord(char) <= 32 or ord(char) == 127 for char in token):
+                    raise ValueError("Invalid API token")
+                headers["Authorization"] = "Bearer " + token
+            if self.command == "POST" and body is not None:
                 headers["Content-Type"] = "application/json"
             connection.request(self.command, path, body=body, headers=headers)
             response = connection.getresponse()

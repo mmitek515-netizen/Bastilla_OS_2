@@ -17,6 +17,15 @@ export class ApiError extends Error {
   }
 }
 
+function apiErrorMessage(payload, status) {
+  if (status === 401) return 'Brak autoryzacji API (401). Skonfiguruj DEBIAN13_API_TOKEN wyłącznie po stronie serwera proxy.';
+  if (status === 403) return 'API odrzuciło uprawnienia (403). Sprawdź dostęp operatora.';
+  if (status === 404) return 'Backend nie udostępnia tego endpointu (404).';
+  return typeof payload?.error === 'string'
+    ? payload.error
+    : `Żądanie nie powiodło się (HTTP ${status}).`;
+}
+
 export function createApiClient({ fetchImpl = globalThis.fetch, baseUrl = '' } = {}) {
   async function fetchRequest(path, options) {
     try {
@@ -36,10 +45,7 @@ export function createApiClient({ fetchImpl = globalThis.fetch, baseUrl = '' } =
       throw new ApiError('Runtime zwrócił nieprawidłową odpowiedź.', response.status);
     }
     if (!response.ok) {
-      throw new ApiError(
-        typeof payload.error === 'string' ? payload.error : `Żądanie nie powiodło się (HTTP ${response.status}).`,
-        response.status,
-      );
+      throw new ApiError(apiErrorMessage(payload, response.status), response.status);
     }
     return payload;
   }
@@ -69,10 +75,7 @@ export function createApiClient({ fetchImpl = globalThis.fetch, baseUrl = '' } =
       } catch {
         throw new ApiError('Runtime zwrócił nieprawidłową odpowiedź.', response.status);
       }
-      throw new ApiError(
-        typeof payload.error === 'string' ? payload.error : `Żądanie nie powiodło się (HTTP ${response.status}).`,
-        response.status,
-      );
+      throw new ApiError(apiErrorMessage(payload, response.status), response.status);
     }
     if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream') || !response.body) {
       throw new ApiError('Runtime nie zwrócił strumienia odpowiedzi.', response.status);
@@ -115,8 +118,10 @@ export function createApiClient({ fetchImpl = globalThis.fetch, baseUrl = '' } =
     getStatus: () => request('status'),
     getAgents: () => request('agents'),
     getTasks: () => request('tasks'),
+    getTask: (taskId) => request(`tasks/${encodeURIComponent(taskId)}`),
     getEvents: () => request('events'),
     getMessages: (sessionId) => request(`sessions/${encodeURIComponent(sessionId)}/messages`),
+    cancelTask: (taskId) => request(`tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }),
     chatStream,
     terminal: (command) => post('terminal', { command }),
   });
@@ -287,12 +292,33 @@ function renderTasks(tasks) {
   for (const task of tasks) {
     const item = document.createElement('li');
     item.className = 'task-item';
+    item.dataset.taskId = task.id;
     const detail = document.createElement('span');
     detail.textContent = `${task.kind} · ${task.agent} · ${task.id}`;
     const status = document.createElement('span');
     status.className = `task-state task-${task.status}`;
     status.textContent = task.status;
-    item.append(detail, status);
+    const actions = document.createElement('span');
+    actions.className = 'task-actions';
+    if (typeof task.id === 'string' && SESSION_ID_PATTERN.test(task.id)) {
+      const reconnect = document.createElement('button');
+      reconnect.type = 'button';
+      reconnect.className = 'task-action';
+      reconnect.textContent = 'Pobierz status';
+      reconnect.setAttribute('aria-label', `Pobierz status zadania ${task.id}`);
+      reconnect.addEventListener('click', () => void refreshTaskStatus(task.id, reconnect));
+      actions.append(reconnect);
+      if (['queued', 'running'].includes(task.status)) {
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'task-action task-cancel';
+        cancel.textContent = 'Anuluj';
+        cancel.setAttribute('aria-label', `Anuluj zadanie ${task.id}`);
+        cancel.addEventListener('click', () => void cancelWorkTask(task.id, cancel));
+        actions.append(cancel);
+      }
+    }
+    item.append(detail, status, actions);
     fragment.append(item);
   }
   if (!tasks.length) {
@@ -390,6 +416,8 @@ function renderHistory(activeId = '') {
 const api = createApiClient();
 let activeSessionId = '';
 let activeChatController = null;
+let activeChatTaskId = '';
+let activeChatCancelMessage = '';
 
 async function loadStatus() {
   connectionState('loading', 'Ładowanie statusu…');
@@ -400,7 +428,7 @@ async function loadStatus() {
   try {
     renderRuntimeStatus(await api.getStatus());
   } catch (error) {
-    connectionState('error', 'Runtime niedostępny');
+    connectionState('error', error.status === 401 ? 'Wymagana autoryzacja' : 'Runtime niedostępny');
     for (const id of ['application-status', 'os-status', 'model-status', 'task-storage-status']) {
       setText(id, 'Niedostępny');
     }
@@ -433,11 +461,13 @@ async function loadTasks() {
     const payload = await api.getTasks();
     if (!Array.isArray(payload.tasks)) throw new ApiError('Nieprawidłowy format listy zadań.');
     renderTasks(payload.tasks);
+    return null;
   } catch (error) {
     setText('tasks-count', 'Zadania niedostępne');
     setText('tasks-error', error.message);
     const list = document.getElementById('task-list');
     if (list) list.replaceChildren();
+    return error;
   }
 }
 
@@ -455,15 +485,83 @@ async function loadEvents() {
     const payload = await api.getEvents();
     if (!Array.isArray(payload.events)) throw new ApiError('Nieprawidłowy format dziennika zdarzeń.');
     renderEvents(payload.events);
+    return null;
   } catch (error) {
     setText('events-count', 'Zdarzenia niedostępne');
     setText('events-error', error.message);
     if (list) list.replaceChildren();
+    return error;
   }
 }
 
 async function refreshWork() {
-  await Promise.all([loadTasks(), loadEvents()]);
+  const button = document.getElementById('refresh-tasks');
+  if (button?.disabled) return;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Łączenie…';
+  }
+  setText('work-connection-state', 'Ponowne łączenie z API…');
+  const [tasksError, eventsError] = await Promise.all([loadTasks(), loadEvents()]);
+  const error = tasksError ?? eventsError;
+  setText('work-connection-state', error
+    ? error.status === 401
+      ? 'Brak autoryzacji — skonfiguruj DEBIAN13_API_TOKEN po stronie serwera proxy.'
+      : error.status === 403
+        ? 'Dostęp do Work został odrzucony przez API.'
+        : error.status === 404
+          ? 'Ten backend nie udostępnia części funkcji Work.'
+          : 'Połączenie z Work niedostępne. Użyj „Ponów połączenie”.'
+    : 'Połączono z API. Zadania i zdarzenia odświeżone.');
+  if (button) {
+    button.textContent = error ? 'Ponów połączenie' : 'Odśwież';
+    button.disabled = false;
+  }
+  return !error;
+}
+
+async function refreshTaskStatus(taskId, button) {
+  button.disabled = true;
+  try {
+    const payload = await api.getTask(taskId);
+    if (!payload.task || payload.task.id !== taskId || typeof payload.task.status !== 'string') {
+      throw new ApiError('API zwróciło nieprawidłowy status zadania.');
+    }
+    const item = button.closest('[data-task-id]');
+    const status = item?.querySelector('.task-state');
+    if (status) {
+      status.textContent = payload.task.status;
+      status.className = `task-state task-${payload.task.status}`;
+    }
+    setText('work-connection-state', `Status zadania pobrany z API: ${payload.task.status}.`);
+    setText('tasks-error', '');
+  } catch (error) {
+    setText('tasks-error', error.message);
+    setText('work-connection-state', error.status === 404
+      ? 'Szczegółowy status zadania nie jest dostępny w tym backendzie.'
+      : error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function cancelWorkTask(taskId, button) {
+  button.disabled = true;
+  setText('work-connection-state', 'Wysyłanie żądania anulowania do API…');
+  try {
+    const payload = await api.cancelTask(taskId);
+    if (!payload.task || payload.task.id !== taskId) {
+      throw new ApiError('API nie potwierdziło zadania do anulowania.');
+    }
+    await refreshWork();
+    setText('work-connection-state', `API przyjęło żądanie anulowania: ${payload.task.status}.`);
+  } catch (error) {
+    setText('tasks-error', error.message);
+    setText('work-connection-state', error.status === 404
+      ? 'Ten backend nie obsługuje anulowania zadań.'
+      : error.message);
+    button.disabled = false;
+  }
 }
 
 async function refreshDashboard() {
@@ -627,6 +725,8 @@ function bindChatForm() {
 
     const controller = new AbortController();
     activeChatController = controller;
+    activeChatTaskId = '';
+    activeChatCancelMessage = '';
     const agentName = AGENT_PROFILES.find((profile) => profile.id === agent.value)?.name ?? agent.value;
     const userMessage = text;
     appendTranscript('user', `Ty · ${agentName}`, userMessage);
@@ -636,6 +736,7 @@ function bindChatForm() {
     feedback.textContent = 'Łączenie ze strumieniem API…';
     let responseText = '';
     let receivedDone = false;
+    let receivedCancelled = false;
     let responseSource = '';
     let responseAgent = agentName;
     let responseSessionId = '';
@@ -644,6 +745,9 @@ function bindChatForm() {
       await api.chatStream(userMessage, agent.value, activeSessionId, ({ event: streamEvent, payload }) => {
         if (streamEvent === 'meta' && typeof payload.session_id === 'string') {
           responseSessionId = payload.session_id;
+          if (typeof payload.task_id === 'string' && SESSION_ID_PATTERN.test(payload.task_id)) {
+            activeChatTaskId = payload.task_id;
+          }
         } else if (streamEvent === 'delta' && typeof payload.text === 'string') {
           responseText += payload.text;
           if (responseBubble) responseBubble.text.textContent = responseText;
@@ -654,10 +758,25 @@ function bindChatForm() {
           responseSessionId = payload.session_id ?? responseSessionId;
           responseSource = payload.source ?? '';
           responseAgent = AGENT_PROFILES.find((profile) => profile.id === payload.agent)?.name ?? responseAgent;
+        } else if (streamEvent === 'cancelled') {
+          receivedCancelled = true;
+          responseSessionId = payload.session_id ?? responseSessionId;
+          if (responseBubble) {
+            responseBubble.heading.textContent = `${agentName} · anulowano przez API`;
+            if (!responseText) responseBubble.text.textContent = 'API potwierdziło przerwanie zadania.';
+          }
         } else if (streamEvent === 'error') {
           throw new ApiError(typeof payload.error === 'string' ? payload.error : 'Strumień czatu zakończył się błędem.');
         }
       }, controller.signal);
+      if (receivedCancelled) {
+        if (responseSessionId && SESSION_ID_PATTERN.test(responseSessionId)) {
+          activeSessionId = responseSessionId;
+          recordHistory(responseSessionId, userMessage);
+        }
+        feedback.textContent = 'API potwierdziło anulowanie zadania.';
+        return;
+      }
       if (!receivedDone) throw new ApiError('Strumień zakończył się przed potwierdzeniem odpowiedzi.');
       if (responseBubble) responseBubble.heading.textContent = `${responseAgent} · ${responseSource || 'API'}`;
       if (responseSessionId && SESSION_ID_PATTERN.test(responseSessionId)) {
@@ -670,8 +789,9 @@ function bindChatForm() {
         : 'Odpowiedź lokalnej obsługi polecenia API.';
     } catch (error) {
       if (error?.name === 'AbortError') {
-        if (responseBubble) responseBubble.heading.textContent = `${agentName} · przerwano`;
-        feedback.textContent = 'Strumień zatrzymany. Backend zapisuje historię dopiero po zakończeniu odpowiedzi.';
+        if (responseBubble) responseBubble.heading.textContent = `${agentName} · strumień przerwany lokalnie`;
+        feedback.textContent = activeChatCancelMessage
+          || 'Zatrzymano odbiór strumienia. Backend nie potwierdził anulowania zadania.';
       } else {
         if (!responseText && responseBubble) responseBubble.entry.remove();
         else if (responseBubble) responseBubble.heading.textContent = `${agentName} · odpowiedź nieukończona`;
@@ -682,12 +802,43 @@ function bindChatForm() {
       }
     } finally {
       activeChatController = null;
+      activeChatTaskId = '';
       submit.hidden = false;
       stop.hidden = true;
+      stop.disabled = false;
+      stop.textContent = 'Zatrzymaj';
       await loadTasks();
     }
   });
-  document.getElementById('chat-stop')?.addEventListener('click', () => activeChatController?.abort());
+  document.getElementById('chat-stop')?.addEventListener('click', async (event) => {
+    const stop = event.currentTarget;
+    if (!activeChatController || stop.disabled) return;
+    const controller = activeChatController;
+    const taskId = activeChatTaskId;
+    if (!taskId) {
+      activeChatCancelMessage = 'Brak ID zadania do anulowania. Zatrzymano odbiór strumienia; anulowanie serwera nie jest potwierdzone.';
+      controller.abort();
+      return;
+    }
+    stop.disabled = true;
+    stop.textContent = 'Anulowanie…';
+    setText('chat-feedback', 'Wysyłanie żądania anulowania do API…');
+    try {
+      const payload = await api.cancelTask(taskId);
+      if (payload.task?.id !== taskId) throw new ApiError('API nie potwierdziło zadania do anulowania.');
+      if (activeChatController !== controller) return;
+      setText('chat-feedback', `API przyjęło anulowanie (${payload.task.status}); oczekiwanie na zdarzenie SSE.`);
+    } catch (error) {
+      if (activeChatController !== controller) return;
+      controller.abort();
+      activeChatCancelMessage = error.status === 404
+        ? 'Ten backend nie udostępnia anulowania zadania. Zatrzymano odbiór strumienia lokalnie; anulowanie serwera nie jest potwierdzone.'
+        : error.status === 401 || error.status === 403
+          ? `${error.message} Zatrzymano odbiór strumienia; anulowanie serwera nie jest potwierdzone.`
+          : `${error.message} Zatrzymano odbiór strumienia; anulowanie serwera nie jest potwierdzone.`;
+      setText('chat-feedback', activeChatCancelMessage);
+    }
+  });
 }
 
 function bindTerminalForm() {

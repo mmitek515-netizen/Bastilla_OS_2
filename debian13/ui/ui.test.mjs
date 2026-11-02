@@ -12,6 +12,7 @@ import {
 const uiDirectory = new URL('./', import.meta.url);
 const readUiFile = (name) => readFile(new URL(name, uiDirectory), 'utf8');
 const TEST_SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
+const TEST_TASK_ID = '123e4567-e89b-42d3-a456-426614174001';
 
 async function startTestDouble(t) {
   const requests = [];
@@ -45,6 +46,10 @@ async function startTestDouble(t) {
       };
     } else if (request.method === 'GET' && path === '/api/v1/tasks') {
       payload = { tasks: [] };
+    } else if (request.method === 'GET' && path === `/api/v1/tasks/${TEST_TASK_ID}`) {
+      payload = { task: { id: TEST_TASK_ID, kind: 'chat', agent: 'aria', status: 'running' } };
+    } else if (request.method === 'POST' && path === `/api/v1/tasks/${TEST_TASK_ID}/cancel`) {
+      payload = { task: { id: TEST_TASK_ID, kind: 'chat', agent: 'aria', status: 'cancel_requested' } };
     } else if (request.method === 'GET' && path === '/api/v1/events') {
       payload = {
         events: [{
@@ -73,6 +78,14 @@ async function startTestDouble(t) {
         response.write(`event: delta\ndata: ${JSON.stringify({ text: 'lokalna.' })}\n\n`);
         response.write(`event: done\ndata: ${JSON.stringify({ session_id: TEST_SESSION_ID, source: 'local_command', agent: JSON.parse(body).agent, task: { id: 'test-help-task', status: 'completed' } })}\n\n`);
         response.end();
+        return;
+      } else if (JSON.parse(body).message === '/cancel') {
+        response.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'X-Debian13-Test-Double': 'true',
+        });
+        response.write(`event: meta\ndata: ${JSON.stringify({ session_id: TEST_SESSION_ID, task_id: TEST_TASK_ID })}\n\n`);
+        response.end(`event: cancelled\ndata: ${JSON.stringify({ error: 'request_cancelled', task: { id: TEST_TASK_ID, status: 'cancelled' } })}\n\n`);
         return;
       } else {
         status = 503;
@@ -182,6 +195,44 @@ test('streams v1 SSE events and loads history from the requested session', async
   assert.deepEqual(requests[0].body, { message: '/help', agent: 'aria' });
 });
 
+test('retrieves a persisted task after reconnect and sends an empty cancellation request', async (t) => {
+  const { api, requests } = await startTestDouble(t);
+  const task = await api.getTask(TEST_TASK_ID);
+  const cancelled = await api.cancelTask(TEST_TASK_ID);
+
+  assert.equal(task.task.id, TEST_TASK_ID);
+  assert.equal(task.task.status, 'running');
+  assert.equal(cancelled.task.status, 'cancel_requested');
+  assert.deepEqual(requests.map(({ method, path, body }) => ({ method, path, body })), [
+    { method: 'GET', path: `/api/v1/tasks/${TEST_TASK_ID}`, body: null },
+    { method: 'POST', path: `/api/v1/tasks/${TEST_TASK_ID}/cancel`, body: null },
+  ]);
+});
+
+test('recognizes explicit SSE cancellation without treating it as a fake completed reply', async (t) => {
+  const { api } = await startTestDouble(t);
+  const events = [];
+  await api.chatStream('/cancel', 'aria', '', (event) => events.push(event));
+  assert.deepEqual(events.map(({ event }) => event), ['meta', 'cancelled']);
+  assert.equal(events.at(-1).payload.task.status, 'cancelled');
+});
+
+test('maps HTTP auth failures to server-side operator configuration guidance', async () => {
+  const api = createApiClient({
+    fetchImpl: async () => new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  });
+  await assert.rejects(api.getTasks(), (error) => {
+    assert.ok(error instanceof ApiError);
+    assert.equal(error.status, 401);
+    assert.match(error.message, /DEBIAN13_API_TOKEN.*proxy/);
+    assert.doesNotMatch(error.message, /Bearer\s+\S+/i);
+    return true;
+  });
+});
+
 test('posts allowed pwd and denied shell command to the HTTP test-double', async (t) => {
   const { api, requests } = await startTestDouble(t);
   const pwd = await api.terminal('pwd');
@@ -222,6 +273,8 @@ test('provides responsive UI with independent loading and API error states', asy
   assert.match(html, /id="event-list"/);
   assert.match(html, /nie jest to strumień na żywo ani systemowy dziennik Debiana/);
   assert.match(html, /id="chat-stop"/);
+  assert.match(html, /id="work-connection-state"/);
+  assert.match(html, /Ponów połączenie/);
   assert.match(html, /API v1 nie obsługuje czatu grupowego/);
   assert.match(html, /nie udostępnia[\s\S]*planów wieloetapowych/);
   assert.match(html, /aria-live="polite"/);
@@ -230,9 +283,12 @@ test('provides responsive UI with independent loading and API error states', asy
   assert.match(css, /position: sticky/);
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.match(css, /:focus-visible/);
-  for (const endpoint of ["'status'", "'agents'", "'tasks'", "'events'", "'chat/stream'", "'terminal'", 'sessions/${encodeURIComponent']) {
+  for (const endpoint of ["'status'", "'agents'", "'tasks'", "'events'", "'chat/stream'", "'terminal'", 'tasks/${encodeURIComponent', 'sessions/${encodeURIComponent']) {
     assert.ok(app.includes(endpoint), `expected API endpoint ${endpoint}`);
   }
   assert.match(app, /error\.status === 503/);
+  assert.match(app, /streamEvent === 'cancelled'/);
+  assert.match(app, /error\.status === 401/);
+  assert.match(app, /api\.cancelTask\(taskId\)/);
   assert.doesNotMatch(app, /\.innerHTML\s*=/);
 });

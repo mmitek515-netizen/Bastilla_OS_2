@@ -7,6 +7,7 @@ import test from 'node:test';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const TEST_SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
+const TEST_TASK_ID = '123e4567-e89b-42d3-a456-426614174001';
 
 async function reserveLoopbackPort() {
   const server = createServer();
@@ -28,6 +29,7 @@ async function startUpstreamDouble(t) {
       method: request.method,
       url: request.url,
       contentType: request.headers['content-type'] ?? null,
+      authorization: request.headers.authorization ?? null,
       body: Buffer.concat(chunks).toString('utf8'),
     });
     if (request.url === '/api/v1/chat/stream') {
@@ -56,13 +58,14 @@ async function startUpstreamDouble(t) {
   return { port: server.address().port, requests };
 }
 
-async function startUiProxy(t, apiPort) {
+async function startUiProxy(t, apiPort, apiToken = '') {
   const port = await reserveLoopbackPort();
   const child = spawn('python3', ['debian13/ui/dev_server.py'], {
     cwd: repositoryRoot,
     env: {
       ...process.env,
       DEBIAN13_API_PORT: String(apiPort),
+      DEBIAN13_API_TOKEN: apiToken,
       DEBIAN13_UI_PORT: String(port),
     },
     stdio: 'ignore',
@@ -106,6 +109,7 @@ test('real loopback proxy allows only contract routes and normalizes upstream he
   assert.equal(status.headers.get('x-upstream-header'), null);
   assert.equal(status.headers.get('content-security-policy')?.includes("default-src 'self'"), true);
   assert.deepEqual(await status.json(), { ok: true, path: '/api/v1/status' });
+  assert.equal(upstream.requests[0].authorization, null, 'the proxy must not forward a browser-supplied token by default');
 
   const chat = await fetch(`${baseUrl}/api/v1/chat`, {
     method: 'POST',
@@ -146,12 +150,48 @@ test('real loopback proxy allows only contract routes and normalizes upstream he
   assert.equal(events.status, 200);
   assert.deepEqual(await events.json(), { ok: true, path: '/api/v1/events' });
 
+  const task = await fetch(`${baseUrl}/api/v1/tasks/${TEST_TASK_ID}`);
+  assert.equal(task.status, 200);
+  assert.deepEqual(await task.json(), { ok: true, path: `/api/v1/tasks/${TEST_TASK_ID}` });
+
   const denied = await fetch(`${baseUrl}/api/v1/agents/extra`);
   assert.equal(denied.status, 404);
   assert.deepEqual(await denied.json(), { error: 'Nie znaleziono endpointu API.' });
   const invalidSession = await fetch(`${baseUrl}/api/v1/sessions/not-a-uuid/messages`);
   assert.equal(invalidSession.status, 404);
-  assert.equal(upstream.requests.length, 5, 'disallowed paths must not reach the upstream API');
+  const invalidTask = await fetch(`${baseUrl}/api/v1/tasks/not-a-uuid`);
+  assert.equal(invalidTask.status, 404);
+  assert.equal(upstream.requests.length, 6, 'disallowed paths must not reach the upstream API');
+});
+
+test('real loopback proxy injects only its configured operator token and forwards bodyless cancel', async (t) => {
+  const upstream = await startUpstreamDouble(t);
+  const fixtureToken = 'fixture-only-operator-token';
+  const baseUrl = await startUiProxy(t, upstream.port, fixtureToken);
+
+  const response = await fetch(`${baseUrl}/api/v1/tasks/${TEST_TASK_ID}/cancel`, {
+    method: 'POST',
+    headers: { Authorization: ['Bear', 'er browser-supplied-token'].join('') },
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).path, `/api/v1/tasks/${TEST_TASK_ID}/cancel`);
+  assert.equal(upstream.requests.length, 1);
+  assert.equal(upstream.requests[0].authorization, ['Bear', 'er fixture-only-operator-token'].join(''));
+  assert.equal(upstream.requests[0].contentType, null);
+  assert.equal(upstream.requests[0].body, '');
+});
+
+test('real loopback proxy rejects a body on task cancellation before forwarding', async (t) => {
+  const upstream = await startUpstreamDouble(t);
+  const baseUrl = await startUiProxy(t, upstream.port);
+  const response = await fetch(`${baseUrl}/api/v1/tasks/${TEST_TASK_ID}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: 'Anulowanie zadania nie przyjmuje treści.' });
+  assert.equal(upstream.requests.length, 0);
 });
 
 test('real loopback proxy rejects oversized writes before forwarding', async (t) => {
