@@ -6339,7 +6339,7 @@ app.post('/api/kernel/agent', (_req, res) => {
 // ============================================================================
 
 const agentTasksToken = (process.env.BASTILLA_AGENT_TASKS_TOKEN || '').trim();
-const TASK_DECISION_WINDOW_MS = 60_000;
+const TASK_RATE_LIMIT_WINDOW_MS = 60_000;
 
 function authorizeAgentTasks(req: express.Request, res: express.Response): boolean {
   if (!agentTasksToken) {
@@ -6357,16 +6357,15 @@ const requireAgentTasksAuthorization: express.RequestHandler = (req, res, next) 
   if (authorizeAgentTasks(req, res)) next();
 };
 
-const agentTaskDecisionRateLimit = rateLimit({
-  windowMs: TASK_DECISION_WINDOW_MS,
-  limit: 30,
+const agentTaskRateLimit = rateLimit({
+  windowMs: TASK_RATE_LIMIT_WINDOW_MS,
+  limit: 120,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  message: { success: false, error: 'Za dużo decyzji dotyczących zadań. Spróbuj ponownie za chwilę.' },
+  message: { success: false, error: 'Za dużo żądań dotyczących zadań. Spróbuj ponownie za chwilę.' },
 });
 
-app.use('/api/agent-tasks/:id/approve', requireAgentTasksAuthorization, agentTaskDecisionRateLimit);
-app.use('/api/agent-tasks/:id/retry', requireAgentTasksAuthorization, agentTaskDecisionRateLimit);
+app.use('/api/agent-tasks', agentTaskRateLimit);
 
 app.get('/api/agent-tasks', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -6453,7 +6452,7 @@ app.post('/api/agent-tasks/cancel', (req, res) => {
   return res.json({ success });
 });
 
-app.post('/api/agent-tasks/:id/approve', (req, res) => {
+app.post('/api/agent-tasks/:id/approve', requireAgentTasksAuthorization, (req, res) => {
   const success = agentTaskRegistry.approve(req.params.id);
   return res.status(success ? 200 : 409).json({
     success,
@@ -6461,7 +6460,7 @@ app.post('/api/agent-tasks/:id/approve', (req, res) => {
   });
 });
 
-app.post('/api/agent-tasks/:id/retry', (req, res) => {
+app.post('/api/agent-tasks/:id/retry', requireAgentTasksAuthorization, (req, res) => {
   const success = agentTaskRegistry.retry(req.params.id);
   return res.status(success ? 200 : 409).json({
     success,
