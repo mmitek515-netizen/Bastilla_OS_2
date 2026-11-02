@@ -30,7 +30,14 @@ function invalid(error: string): ChatApprovalCommand {
 }
 
 export function parseChatApprovalCommand(message: string): ChatApprovalCommand | null {
-  if (!/^\/(?:propose|approve|reject|proposals)(?:\s|$)/i.test(message)) return null;
+  const trimmedMessage = message.trim();
+  if (/^\/\s*exec(?:\s|$)/i.test(trimmedMessage) || /^!\S/.test(trimmedMessage)) {
+    return invalid('Dowolne polecenia powłoki są wyłączone. Czat obsługuje wyłącznie kontrolowane operacje wymagające zatwierdzenia.');
+  }
+
+  if (!/^\/(?:propose|approve|reject|proposals)(?:\s|$)/i.test(message)) {
+    return parseNaturalChatApproval(message);
+  }
 
   const newline = message.indexOf('\n');
   const firstLine = (newline === -1 ? message : message.slice(0, newline)).replace(/\r$/, '');
@@ -102,4 +109,49 @@ export function parseChatApprovalCommand(message: string): ChatApprovalCommand |
   return invalid(
     'Dozwolone propozycje: create-app <id> [typ], create-db <id>, write-file <id-aplikacji> <plik> + treść w następnej linii, launch <id>.',
   );
+}
+
+function parseNaturalChatApproval(message: string): ChatApprovalCommand | null {
+  const normalized = message
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ł/gi, 'l')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+
+  const createApp = normalized.match(
+    /^(?:utworz|stworz|zbuduj)\s+(?:(?:nowa|nowy)\s+)?(?:aplikacje|projekt)\s+(\S+)(?:\s+(?:typ\s+)?(\S+))?$/,
+  ) ?? normalized.match(
+    /^(?:create|make|build)\s+(?:(?:a|an)\s+)?(?:new\s+)?(?:app|application|project)\s+(\S+)(?:\s+(?:type\s+)?(\S+))?$/,
+  );
+  if (createApp) {
+    const [, id, appType] = createApp;
+    if (!SAFE_APP_ID.test(id)) return invalid('Id projektu może zawierać tylko litery, cyfry, podkreślenia i myślniki (maks. 32 znaki).');
+    return parseChatApprovalCommand(`/propose create-app ${id}${appType ? ` ${appType}` : ''}`);
+  }
+
+  const createDatabase = normalized.match(
+    /^(?:utworz|stworz)\s+(?:(?:nowa|nowy)\s+)?(?:baze|baza)\s+(\S+)$/,
+  ) ?? normalized.match(
+    /^(?:create|make)\s+(?:(?:a|an)\s+)?(?:new\s+)?(?:database|db)\s+(\S+)$/,
+  );
+  if (createDatabase) {
+    const [, id] = createDatabase;
+    if (!SAFE_DATABASE_ID.test(id)) return invalid('Id bazy może zawierać tylko litery, cyfry, podkreślenia i myślniki (maks. 48 znaków).');
+    return parseChatApprovalCommand(`/propose create-db ${id}`);
+  }
+
+  const launch = normalized.match(
+    /^(?:uruchom|otworz)\s+(?:aplikacje|projekt)\s+(\S+)$/,
+  ) ?? normalized.match(
+    /^(?:launch|open)\s+(?:(?:the|my)\s+)?(?:app|application|project)\s+(\S+)$/,
+  );
+  if (launch) {
+    const [, appId] = launch;
+    if (!SAFE_APP_ID.test(appId)) return invalid('Id projektu może zawierać tylko litery, cyfry, podkreślenia i myślniki (maks. 32 znaki).');
+    return parseChatApprovalCommand(`/propose launch ${appId}`);
+  }
+
+  return null;
 }

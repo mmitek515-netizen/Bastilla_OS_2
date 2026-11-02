@@ -24,7 +24,7 @@ interface BastillaOSDashboardViewProps {
   onUpdateDataStore: React.Dispatch<React.SetStateAction<DataStore>>;
   isLoading: boolean;
   onClearHistory: () => void;
-  onForceSync: () => void;
+  onForceSync: (operatorToken?: string) => void;
   onExecutePythonCommand?: (cmd: string) => Promise<any>;
 }
 

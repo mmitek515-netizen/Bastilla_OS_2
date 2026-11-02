@@ -28,12 +28,13 @@ interface AgentCommsViewProps {
     message: string,
     agent: 'triad' | 'Alex' | 'Astyria' | 'Aurelius' | 'si_1',
     attachments?: ChatAttachment[],
+    operatorToken?: string,
   ) => Promise<void>;
-  onRunAstyriaMission: (action: AstyriaMissionAction) => Promise<void>;
+  onRunAstyriaMission: (action: AstyriaMissionAction, operatorToken?: string) => Promise<void>;
   isLoading: boolean;
   sendError?: string | null;
   onClearHistory: () => void;
-  onForceSync?: () => void;
+  onForceSync?: (operatorToken?: string) => void;
   onTriggerInitiative?: () => Promise<void>;
   onUnclog?: () => void;
   onRestoreBackup?: () => void;
@@ -59,6 +60,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
   const [time, setTime] = useState('');
   const [selectedMissionAction, setSelectedMissionAction] = useState<AstyriaMissionAction>('deep_scan');
   const [messageText, setMessageText] = useState('');
+  const [operatorToken, setOperatorToken] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [mobileSection, setMobileSection] = useState<'chat' | 'agents'>('chat');
@@ -103,7 +105,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     if (isLoading) return;
     setSelectedTarget('Astyria');
     try {
-      await onRunAstyriaMission(selectedMissionAction);
+      await onRunAstyriaMission(selectedMissionAction, operatorToken);
     } catch {
       // The parent exposes mission errors in the chat status.
     }
@@ -116,7 +118,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
       : messageText.trim();
     if ((!message && chatAttachments.length === 0) || isLoading) return;
     try {
-      await onSendMessage(message, selectedTarget, chatAttachments);
+      await onSendMessage(message, selectedTarget, chatAttachments, operatorToken);
       setMessageText('');
       setChatAttachments([]);
       setAttachmentError(null);
@@ -432,7 +434,7 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
               </div>
               {onForceSync && (
                 <button
-                  onClick={onForceSync}
+                  onClick={() => onForceSync(operatorToken)}
                   className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-[11px] cursor-pointer transition"
                 >
                   Odśwież stan
@@ -445,6 +447,18 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
 
         <form onSubmit={handleSendMessage} className="relative w-full shrink-0 border-t border-cyan-500/20 bg-slate-950/90 p-2 backdrop-blur-md sm:p-2.5">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
+          <label className="mb-2 block text-[10px] text-slate-400">
+            Token operatora wymagany do propozycji i zatwierdzeń
+            <input
+              type="password"
+              autoComplete="off"
+              aria-label="Token operatora"
+              value={operatorToken}
+              onChange={(event) => setOperatorToken(event.target.value)}
+              className="mt-1 min-h-9 w-full rounded-md border border-slate-700 bg-slate-900 px-3 text-xs text-slate-100 outline-none focus:border-cyan-400 sm:max-w-sm"
+              placeholder="Token z BASTILLA_CHAT_OPERATOR_TOKEN"
+            />
+          </label>
           {chatAttachments.length > 0 && (
             <ul aria-label="Załączone pliki" className="mb-2 flex flex-wrap gap-1.5">
               {chatAttachments.map((file, index) => (
@@ -599,4 +613,3 @@ export const AgentCommsView: React.FC<AgentCommsViewProps> = ({
     </div>
   );
 };
-

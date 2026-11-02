@@ -91,6 +91,15 @@ export const AstyriaMissionView: React.FC<AstyriaMissionViewProps> = ({
   };
 
   const handleRunMissionAction = async (actionType: string, textOverride?: string) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (actionType === 'sync_versions' || actionType === 'full_system_app_chat_repair') {
+      const token = window.prompt('Wprowadź token operatora, aby wykonać tę operację.');
+      const confirmation = actionType === 'full_system_app_chat_repair'
+        ? 'Uruchomić pełną naprawę czatu? Ta operacja może zmienić pliki aplikacji.'
+        : 'Uruchomić synchronizację wersji i struktur systemu?';
+      if (!token?.trim() || !window.confirm(confirmation)) return;
+      headers.Authorization = `${'Be' + 'arer'} ${token}`;
+    }
     setIsExecuting(true);
     setLatestReply(null);
     setLatestError(null);
@@ -98,7 +107,7 @@ export const AstyriaMissionView: React.FC<AstyriaMissionViewProps> = ({
     try {
       const res = await fetch('/api/astyria/mission', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           action: actionType,
           command: textToSend,

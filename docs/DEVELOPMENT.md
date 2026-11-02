@@ -7,6 +7,13 @@ Configure model credentials through deployment secrets or a local `.env` based o
 `.env.example`. No model is included; unavailable providers must be reported honestly.
 Keep the Codespaces port private: the recovered backend still requires a full access-control audit.
 
+Chat-driven project, database and preview operations accept explicit Polish or English
+requests, but are only queued as proposals. Configure `BASTILLA_CHAT_OPERATOR_TOKEN`
+with a random secret of at least 32 characters to submit, view or approve proposals
+and to confirm protected sync/repair actions. Enter it in the chat and approvals panels;
+it is held in page memory only. Arbitrary shell commands and commands found in model
+responses are never executed.
+
 `npm run verify` runs four independent checks concurrently. GitHub Actions caches npm
 downloads and cancels obsolete runs on the same branch. Automatic Git synchronization
 uses the same command before committing. It cannot resolve competing agent edits;

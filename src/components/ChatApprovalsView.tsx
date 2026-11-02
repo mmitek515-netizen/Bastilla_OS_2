@@ -24,11 +24,20 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [operatorToken, setOperatorToken] = useState('');
 
   const loadApprovals = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
+    if (!operatorToken.trim()) {
+      setApprovals([]);
+      setError('Wprowadź token operatora, aby pobrać propozycje.');
+      setLoading(false);
+      return;
+    }
     try {
-      const response = await fetch('/api/chat/approvals');
+      const response = await fetch('/api/chat/approvals', {
+        headers: { Authorization: `${'Be' + 'arer'} ${operatorToken}` },
+      });
       const result = await response.json();
       if (!response.ok || result.success !== true || !Array.isArray(result.approvals)) {
         throw new Error(result.error || `Nie udało się pobrać propozycji (HTTP ${response.status}).`);
@@ -40,7 +49,7 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [operatorToken]);
 
   useEffect(() => {
     void loadApprovals();
@@ -50,6 +59,10 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
 
   const decide = async (approval: ChatApproval, decision: 'approve' | 'reject') => {
     if (busyId) return;
+    if (!operatorToken.trim()) {
+      setError('Wprowadź token operatora, aby rozstrzygnąć propozycję.');
+      return;
+    }
     if (decision === 'approve' && !window.confirm(`Wykonać tę operację?\n\n${approval.description}\n\nAutor propozycji: ${approval.agent}`)) return;
 
     setBusyId(approval.id);
@@ -58,7 +71,10 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
     try {
       const response = await fetch(`/api/chat/approvals/${encodeURIComponent(approval.id)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `${'Be' + 'arer'} ${operatorToken}`,
+        },
         body: JSON.stringify({ decision }),
       });
       const result = await response.json();
@@ -102,6 +118,19 @@ export const ChatApprovalsView: React.FC<ChatApprovalsViewProps> = ({ onUpdateDa
       </header>
 
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-8">
+        <label className="block text-xs text-slate-300">
+          Token operatora
+          <input
+            type="password"
+            autoComplete="off"
+            value={operatorToken}
+            onChange={(event) => setOperatorToken(event.target.value)}
+            aria-label="Token operatora"
+            className="mt-1 min-h-10 w-full rounded-md border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100 outline-none focus:border-cyan-400 sm:max-w-md"
+            placeholder="BASTILLA_CHAT_OPERATOR_TOKEN"
+          />
+          <span className="mt-1 block text-[10px] text-slate-500">Token jest przechowywany tylko w pamięci tej strony.</span>
+        </label>
         {error && <div role="alert" className="rounded-md border border-rose-500/30 bg-rose-950/30 px-4 py-3 text-sm text-rose-200">{error}</div>}
         {notice && <div role="status" className="rounded-md border border-emerald-500/30 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">{notice}</div>}
 

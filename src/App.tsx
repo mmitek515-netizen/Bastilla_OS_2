@@ -170,11 +170,16 @@ export default function App() {
   };
 
   // Full system & version synchronization via Astyria mission endpoint + kernel state
-  const handleSyncSystem = async () => {
+  const handleSyncSystem = async (operatorToken?: string) => {
+    const token = operatorToken || window.prompt('Wprowadź token operatora, aby zsynchronizować system.');
+    if (!token?.trim() || !window.confirm('Uruchomić synchronizację wersji i struktur systemu?')) return;
     try {
       const res = await fetch('/api/astyria/mission', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `${'Be' + 'arer'} ${token}`,
+        },
         body: JSON.stringify({ action: 'sync_versions', silentChat: true }),
       });
       if (res.ok) {
@@ -204,9 +209,9 @@ export default function App() {
   };
 
   // Immediate manual force sync (used by AgentCommsView Synchronizuj button)
-  const handleForceSync = async () => {
+  const handleForceSync = async (operatorToken?: string) => {
     try {
-      await handleSyncSystem();
+      await handleSyncSystem(operatorToken);
     } finally {
       setIsAgentLoading(false);
     }
@@ -305,13 +310,20 @@ export default function App() {
     }
   };
 
-  const handleRunAstyriaMission = async (action: AstyriaMissionAction) => {
+  const handleRunAstyriaMission = async (action: AstyriaMissionAction, operatorToken?: string) => {
+    let token = operatorToken;
+    if (action === 'sync_versions') {
+      token = token || window.prompt('Wprowadź token operatora, aby zsynchronizować system.') || undefined;
+      if (!token?.trim() || !window.confirm('Uruchomić synchronizację wersji i struktur systemu?')) return;
+    }
     setIsAgentLoading(true);
     setAgentError(null);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token?.trim()) headers.Authorization = `${'Be' + 'arer'} ${token}`;
       const response = await fetch('/api/astyria/mission', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ action }),
       });
       const result = await response.json();
@@ -350,6 +362,7 @@ export default function App() {
     message: string,
     chatAgent: AgentProtocolRequest['agent'] = 'triad',
     attachments: ChatAttachment[] = [],
+    operatorToken?: string,
   ) => {
     const protocolCommand = attachments.length === 0
       ? parseChatProtocolCommand(message, chatAgent)
@@ -359,24 +372,30 @@ export default function App() {
       return;
     }
 
+    const normalizedCommand = message
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase('pl-PL')
+      .replace(/\s+/g, ' ');
+    const isFullChatRepair = attachments.length === 0 && [
+      'napraw to',
+      'napraw czat',
+      'pelna naprawa czatu',
+      'odpowiedz pelna naprawa czatu',
+    ].includes(normalizedCommand);
+    if (isFullChatRepair && !window.confirm('Uruchomić pełną naprawę czatu? Ta operacja może zmienić pliki aplikacji.')) return;
+
     setIsAgentLoading(true);
     setAgentError(null);
     try {
-      const normalizedCommand = message
-        .trim()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLocaleLowerCase('pl-PL')
-        .replace(/\s+/g, ' ');
-      const isFullChatRepair = attachments.length === 0 && [
-        'napraw to',
-        'napraw czat',
-        'pelna naprawa czatu',
-        'odpowiedz pelna naprawa czatu',
-      ].includes(normalizedCommand);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (operatorToken?.trim()) {
+        headers.Authorization = `${'Be' + 'arer'} ${operatorToken}`;
+      }
       const response = await fetch(isFullChatRepair ? '/api/astyria/mission' : '/api/triad/message', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(isFullChatRepair
           ? { action: 'full_system_app_chat_repair', userMessage: message.trim() }
           : { message, agent: chatAgent, attachments }),

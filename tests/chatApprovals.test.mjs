@@ -37,3 +37,39 @@ test('rejects unsafe paths, protected manifests, unsupported actions and oversiz
   assert.equal(parseChatApprovalCommand('/approve not-a-uuid').type, 'invalid');
   assert.equal(parseChatApprovalCommand('hello Alex'), null);
 });
+
+test('maps explicit Polish and English operation requests to bounded proposals', () => {
+  assert.deepEqual(parseChatApprovalCommand('Utwórz nową aplikację Moja-Apka node-api'), {
+    type: 'propose',
+    action: { type: 'create-app', id: 'moja-apka', appType: 'node-api' },
+  });
+  assert.deepEqual(parseChatApprovalCommand('Create a new app my-app'), {
+    type: 'propose',
+    action: { type: 'create-app', id: 'my-app', appType: 'html5-web' },
+  });
+  assert.deepEqual(parseChatApprovalCommand('Utwórz bazę raporty_2026'), {
+    type: 'propose',
+    action: { type: 'create-db', id: 'raporty_2026' },
+  });
+  assert.deepEqual(parseChatApprovalCommand('Launch the app my-app'), {
+    type: 'propose',
+    action: { type: 'launch', appId: 'my-app' },
+  });
+  assert.deepEqual(parseChatApprovalCommand('Otwórz projekt moja-apka'), {
+    type: 'propose',
+    action: { type: 'launch', appId: 'moja-apka' },
+  });
+});
+
+test('rejects unsafe and arbitrary shell requests without producing executable commands', () => {
+  for (const message of [
+    'Create app ../outside',
+    'Utwórz bazę ../../outside',
+    '/exec rm -rf /',
+    '!cat /etc/passwd',
+  ]) {
+    const parsed = parseChatApprovalCommand(message);
+    assert.ok(parsed?.type === 'invalid', `${message} should be rejected`);
+  }
+  assert.equal(parseChatApprovalCommand('Please create an app someday'), null);
+});
