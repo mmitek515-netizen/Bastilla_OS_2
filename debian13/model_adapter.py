@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator, Sequence
 from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -109,18 +110,28 @@ class OllamaAdapter:
             "inference": "verified" if self.inference_verified else "not_verified",
         }
 
-    def chat(self, agent: str, message: str) -> str:
+    def chat(
+        self,
+        agent: str,
+        message: str,
+        history: Sequence[dict[str, str]] = (),
+    ) -> str:
         if not self.model:
             raise RuntimeError("Brak skonfigurowanego modelu. Ustaw DEBIAN13_OLLAMA_MODEL.")
+        messages = [{"role": "system", "content": AGENT_ROLES[agent]}]
+        messages.extend(
+            item
+            for item in history[-40:]
+            if item.get("role") in {"user", "assistant"}
+            and isinstance(item.get("content"), str)
+        )
+        messages.append({"role": "user", "content": message})
         result = self._request_json(
             "/api/chat",
             {
                 "model": self.model,
                 "stream": False,
-                "messages": [
-                    {"role": "system", "content": AGENT_ROLES[agent]},
-                    {"role": "user", "content": message},
-                ],
+                "messages": messages,
             },
         )
         message_result = result.get("message")
@@ -129,3 +140,66 @@ class OllamaAdapter:
             raise RuntimeError("Model returned no answer.")
         self.inference_verified = True
         return content.strip()
+
+    def chat_stream(
+        self,
+        agent: str,
+        message: str,
+        history: Sequence[dict[str, str]] = (),
+    ) -> Iterator[str]:
+        if not self.model:
+            raise RuntimeError("Brak skonfigurowanego modelu. Ustaw DEBIAN13_OLLAMA_MODEL.")
+        messages = [{"role": "system", "content": AGENT_ROLES[agent]}]
+        messages.extend(
+            item
+            for item in history[-40:]
+            if item.get("role") in {"user", "assistant"}
+            and isinstance(item.get("content"), str)
+        )
+        messages.append({"role": "user", "content": message})
+        body = json.dumps(
+            {"model": self.model, "stream": True, "messages": messages}
+        ).encode("utf-8")
+        request = Request(
+            f"{self.base_url}/api/chat",
+            data=body,
+            headers={"Accept": "application/x-ndjson", "Content-Type": "application/json"},
+            method="POST",
+        )
+        total_bytes = 0
+        response_parts: list[str] = []
+        try:
+            with urlopen(request, timeout=15.0) as response:
+                while True:
+                    line = response.readline(MAX_MODEL_RESPONSE_BYTES + 1)
+                    if not line:
+                        break
+                    total_bytes += len(line)
+                    if total_bytes > MAX_MODEL_RESPONSE_BYTES:
+                        raise RuntimeError("Model response exceeded the size limit.")
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                        raise RuntimeError("Model returned an invalid stream.") from error
+                    if not isinstance(event, dict):
+                        raise RuntimeError("Model returned an invalid stream.")
+                    if event.get("error"):
+                        raise RuntimeError("Model returned an error.")
+                    event_message = event.get("message")
+                    content = event_message.get("content") if isinstance(event_message, dict) else None
+                    if content is not None:
+                        if not isinstance(content, str):
+                            raise RuntimeError("Model returned an invalid stream.")
+                        if content:
+                            response_parts.append(content)
+                            yield content
+                    if event.get("done") is True:
+                        if not response_parts:
+                            raise RuntimeError("Model returned no answer.")
+                        self.inference_verified = True
+                        return
+        except (OSError, URLError, TimeoutError) as error:
+            raise RuntimeError("Model niedostępny; nie wygenerowano odpowiedzi.") from error
+        raise RuntimeError("Model returned an incomplete stream.")

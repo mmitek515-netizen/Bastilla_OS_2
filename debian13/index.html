@@ -31,7 +31,11 @@
       </section>
       <div class="columns">
         <section class="card" aria-labelledby="chat-title">
-          <h2 id="chat-title">Czat</h2>
+          <div class="section-heading">
+            <h2 id="chat-title">Czat</h2>
+            <button id="new-session" class="secondary" type="button">Nowa sesja</button>
+          </div>
+          <ol id="chat-history" class="chat-history" aria-label="Historia sesji"></ol>
           <form id="chat-form">
             <label for="agent">Profil</label>
             <select id="agent" name="agent">

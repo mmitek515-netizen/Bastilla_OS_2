@@ -48,6 +48,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 button:disabled { opacity: .6; cursor: wait; }
 .secondary { min-height: 2.2rem; background: #17243a; border-color: #354763; }
 .result { min-height: 3rem; max-height: 18rem; overflow: auto; margin: .8rem 0 0; padding: .7rem; border-radius: .45rem; background: #09111e; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-history { display: grid; gap: .6rem; max-height: 18rem; overflow: auto; margin: 0 0 1rem; padding: 0; list-style: none; }
+.chat-message { padding: .65rem .8rem; border: 1px solid #273650; border-radius: .6rem; background: #17243a; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-message strong { display: block; margin-bottom: .25rem; color: #9ac5ff; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .section-heading h2 { margin-bottom: .5rem; }
 .task-row { display: flex; justify-content: space-between; gap: .8rem; }

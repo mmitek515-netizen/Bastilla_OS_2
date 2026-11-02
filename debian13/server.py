@@ -15,13 +15,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from model_adapter import OllamaAdapter
+from model_adapter import MAX_MODEL_RESPONSE_BYTES, OllamaAdapter
 
 API_VERSION = "v1"
 MAX_BODY_BYTES = 16_384
 MAX_MESSAGE_LENGTH = 12_000
 MAX_TASKS = 100
 MAX_EVENTS = 200
+MAX_SESSIONS = 100
+MAX_SESSION_MESSAGES = 40
+MAX_SESSION_BYTES = 64_000
+MAX_TASK_RESULT_BYTES = 16_000
+SESSION_TTL_SECONDS = 3600
 WORKSPACE = Path(__file__).resolve().parent / "workspace"
 STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -53,6 +58,15 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def bounded_text(value: str, max_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    marker = "\n[treść skrócona]"
+    limit = max(0, max_bytes - len(marker.encode("utf-8")))
+    return encoded[:limit].decode("utf-8", errors="ignore") + marker
+
+
 def debian_runtime() -> dict[str, str | bool]:
     release: dict[str, str] = {}
     try:
@@ -81,6 +95,104 @@ class DemoApplication:
         self._lock = threading.Lock()
         self._tasks: list[dict] = []
         self._events: list[dict] = []
+        self._sessions: dict[str, dict] = {}
+
+    def get_session(self, session_id: str | None = None) -> dict | None:
+        now = time.monotonic()
+        with self._lock:
+            expired = [
+                key
+                for key, session in self._sessions.items()
+                if now - session["last_access"] > SESSION_TTL_SECONDS
+            ]
+            for key in expired:
+                del self._sessions[key]
+            if session_id is not None:
+                try:
+                    if str(uuid.UUID(session_id)) != session_id:
+                        return None
+                except (ValueError, AttributeError):
+                    return None
+                session = self._sessions.get(session_id)
+                if session is None:
+                    return None
+                session["last_access"] = now
+                return session
+
+            if len(self._sessions) >= MAX_SESSIONS:
+                oldest = min(self._sessions, key=lambda key: self._sessions[key]["last_access"])
+                del self._sessions[oldest]
+            session_id = str(uuid.uuid4())
+            session = {
+                "id": session_id,
+                "created_at": utc_now(),
+                "updated_at": utc_now(),
+                "last_access": now,
+                "messages": [],
+                "lock": threading.Lock(),
+                "chat_lock": threading.Lock(),
+            }
+            self._sessions[session_id] = session
+            return session
+
+    def session_messages(self, session_id: str) -> list[dict] | None:
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        with session["lock"]:
+            return [dict(message) for message in session["messages"]]
+
+    def append_exchange(
+        self,
+        session: dict,
+        agent: str,
+        user_message: str,
+        assistant_message: str,
+        source: str,
+    ) -> None:
+        now = utc_now()
+        with session["lock"]:
+            user_budget = min(
+                len(user_message.encode("utf-8")), MAX_SESSION_BYTES // 2
+            )
+            stored_user = bounded_text(user_message, user_budget)
+            stored_assistant = bounded_text(
+                assistant_message, MAX_SESSION_BYTES - len(stored_user.encode("utf-8"))
+            )
+            session["messages"].extend(
+                [
+                    {
+                        "role": "user",
+                        "content": stored_user,
+                        "agent": agent,
+                        "source": source,
+                        "created_at": now,
+                    },
+                    {
+                        "role": "assistant",
+                        "content": stored_assistant,
+                        "agent": agent,
+                        "source": source,
+                        "created_at": now,
+                    },
+                ]
+            )
+            session["messages"] = session["messages"][-MAX_SESSION_MESSAGES:]
+            while (
+                sum(len(item["content"].encode("utf-8")) for item in session["messages"])
+                > MAX_SESSION_BYTES
+            ):
+                session["messages"] = session["messages"][2:]
+            session["updated_at"] = now
+            session["last_access"] = time.monotonic()
+
+    def model_history(self, session: dict) -> list[dict[str, str]]:
+        with session["lock"]:
+            return [
+                {"role": item["role"], "content": item["content"]}
+                for item in session["messages"]
+                if item["source"] == "ollama"
+            ][-MAX_SESSION_MESSAGES:]
 
     def _event(self, event_type: str, agent: str, task_id: str) -> None:
         with self._lock:
@@ -107,6 +219,9 @@ class DemoApplication:
         return task
 
     def update_task(self, task: dict, status: str, **fields: str | None) -> dict:
+        result = fields.get("result")
+        if isinstance(result, str):
+            fields["result"] = bounded_text(result, MAX_TASK_RESULT_BYTES)
         task.update(status=status, updated_at=utc_now(), **fields)
         with self._lock:
             for index, current in enumerate(self._tasks):
@@ -247,26 +362,45 @@ class Debian13Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"tasks": self.application.tasks()})
         elif path == f"/api/{API_VERSION}/events":
             self._send_json(200, {"events": self.application.events()})
+        elif path.startswith(f"/api/{API_VERSION}/sessions/"):
+            parts = path.strip("/").split("/")
+            if len(parts) != 5 or parts[2] != "sessions" or parts[4] != "messages":
+                self._send_json(404, {"error": "Nie znaleziono endpointu."})
+                return
+            session_id = parts[3]
+            messages = self.application.session_messages(session_id)
+            if messages is None:
+                self._send_json(404, {"error": "Sesja nie istnieje lub wygasła."})
+            else:
+                self._send_json(200, {"session_id": session_id, "messages": messages})
         else:
             self._send_json(404, {"error": "Nie znaleziono endpointu."})
 
     def do_POST(self) -> None:
         path = urlsplit(self.path).path
-        if path not in {f"/api/{API_VERSION}/chat", f"/api/{API_VERSION}/terminal"}:
+        if path not in {
+            f"/api/{API_VERSION}/chat",
+            f"/api/{API_VERSION}/chat/stream",
+            f"/api/{API_VERSION}/terminal",
+        }:
             self._send_json(404, {"error": "Nie znaleziono endpointu."})
             return
         try:
             payload = self._read_json()
-            if path.endswith("/chat"):
-                self._handle_chat(payload)
+            if path in {f"/api/{API_VERSION}/chat", f"/api/{API_VERSION}/chat/stream"}:
+                self._handle_chat(payload, streaming=path.endswith("/stream"))
             else:
                 self._handle_terminal(payload)
         except ValueError as error:
             self._send_json(400, {"error": str(error)})
 
-    def _handle_chat(self, payload: dict) -> None:
-        if set(payload) != {"message", "agent"}:
-            self._send_json(400, {"error": "Wymagane są wyłącznie pola message i agent."})
+    def _handle_chat(self, payload: dict, streaming: bool = False) -> None:
+        if not {"message", "agent"} <= set(payload) or set(payload) - {
+            "message",
+            "agent",
+            "session_id",
+        }:
+            self._send_json(400, {"error": "Wymagane są pola message i agent; opcjonalne pole to session_id."})
             return
         message, agent = payload["message"], payload["agent"]
         if not isinstance(message, str) or not message.strip() or len(message) > MAX_MESSAGE_LENGTH:
@@ -275,10 +409,24 @@ class Debian13Handler(BaseHTTPRequestHandler):
         if not isinstance(agent, str) or agent not in AGENTS:
             self._send_json(400, {"error": "Nieznany profil agenta."})
             return
+        session_id = payload.get("session_id")
+        if session_id is not None and not isinstance(session_id, str):
+            self._send_json(400, {"error": "session_id musi być identyfikatorem tekstowym."})
+            return
+        session = self.application.get_session(session_id)
+        if session is None:
+            self._send_json(404, {"error": "Sesja nie istnieje lub wygasła."})
+            return
 
+        with session["chat_lock"]:
+            if streaming:
+                self._handle_stream_chat(session, agent, message.strip())
+            else:
+                self._handle_json_chat(session, agent, message.strip())
+
+    def _handle_json_chat(self, session: dict, agent: str, message: str) -> None:
         task = self.application.start_task(agent, "chat")
         self.application.update_task(task, "running")
-        message = message.strip()
         if message == "/help":
             reply = "Obsługiwane lokalne polecenia: /help, /status, /terminal pwd, /terminal ls, /terminal cat <plik>. Pozostałe wiadomości wymagają dostępnego modelu Ollama."
             source = "local_command"
@@ -300,7 +448,9 @@ class Debian13Handler(BaseHTTPRequestHandler):
             return
         else:
             try:
-                reply = self.application.model.chat(agent, message)
+                reply = self.application.model.chat(
+                    agent, message, self.application.model_history(session)
+                )
             except RuntimeError as error:
                 public_error = str(error)
                 self.application.update_task(task, "failed", error=public_error)
@@ -308,11 +458,117 @@ class Debian13Handler(BaseHTTPRequestHandler):
                 return
             source = "ollama"
 
+        self.application.append_exchange(session, agent, message, reply, source)
         completed = self.application.update_task(task, "completed", result=reply)
         self._send_json(
             200,
-            {"reply": reply, "source": source, "agent": agent, "task": completed},
+            {
+                "reply": reply,
+                "source": source,
+                "agent": agent,
+                "session_id": session["id"],
+                "task": completed,
+            },
         )
+
+    def _handle_stream_chat(self, session: dict, agent: str, message: str) -> None:
+        task = self.application.start_task(agent, "chat")
+        self.application.update_task(task, "running")
+        source = "ollama"
+        try:
+            local_reply = self._local_reply(message)
+            if local_reply is None:
+                reply_stream = self.application.model.chat_stream(
+                    agent, message, self.application.model_history(session)
+                )
+            else:
+                source, reply = local_reply
+                reply_stream = (
+                    reply[index : index + 64]
+                    for index in range(0, len(reply), 64)
+                )
+        except (RuntimeError, ValueError) as error:
+            self.application.update_task(task, "failed", error=str(error))
+            self._send_json(
+                400 if isinstance(error, ValueError) else 503,
+                {"error": str(error), "task": task},
+            )
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'",
+        )
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        parts: list[str] = []
+        total_bytes = 0
+        try:
+            self._send_sse("meta", {"session_id": session["id"], "task_id": task["id"]})
+            for chunk in reply_stream:
+                if not chunk:
+                    continue
+                total_bytes += len(chunk.encode("utf-8"))
+                if total_bytes > MAX_MODEL_RESPONSE_BYTES:
+                    raise RuntimeError("Model response exceeded the size limit.")
+                parts.append(chunk)
+                self._send_sse("delta", {"text": chunk})
+            reply = "".join(parts).strip()
+            if not reply:
+                raise RuntimeError("Model returned no answer.")
+        except (BrokenPipeError, ConnectionResetError):
+            self.application.update_task(
+                task, "failed", error="Klient przerwał połączenie ze strumieniem."
+            )
+            return
+        except RuntimeError as error:
+            failed = self.application.update_task(task, "failed", error=str(error))
+            try:
+                self._send_sse("error", {"error": str(error), "task": failed})
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+
+        self.application.append_exchange(session, agent, message, reply, source)
+        completed = self.application.update_task(task, "completed", result=reply)
+        try:
+            self._send_sse(
+                "done",
+                {
+                    "session_id": session["id"],
+                    "source": source,
+                    "agent": agent,
+                    "task": {"id": completed["id"], "status": completed["status"]},
+                },
+            )
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _local_reply(self, message: str) -> tuple[str, str] | None:
+        if message == "/help":
+            return (
+                "local_command",
+                "Obsługiwane lokalne polecenia: /help, /status, /terminal pwd, /terminal ls, /terminal cat <plik>. Pozostałe wiadomości wymagają dostępnego modelu Ollama.",
+            )
+        if message == "/status":
+            return "local_status", json.dumps(self.application.status(), ensure_ascii=False)
+        if message.startswith("/terminal "):
+            return (
+                "restricted_terminal",
+                self.application.terminal(message.removeprefix("/terminal ").strip()),
+            )
+        if message.startswith("/"):
+            raise ValueError("Nieobsługiwane polecenie czatu.")
+        return None
+
+    def _send_sse(self, event: str, payload: dict) -> None:
+        data = json.dumps(payload, ensure_ascii=False)
+        self.wfile.write(f"event: {event}\ndata: {data}\n\n".encode("utf-8"))
+        self.wfile.flush()
 
     def _handle_terminal(self, payload: dict) -> None:
         if set(payload) != {"command"} or not isinstance(payload["command"], str):

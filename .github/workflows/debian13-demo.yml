@@ -27,3 +27,5 @@ jobs:
         run: python -m unittest discover -s debian13/tests -v
       - name: Loopback API smoke test
         run: python debian13/smoke_test.py
+      - name: Browser client syntax check
+        run: node --check debian13/app.js
