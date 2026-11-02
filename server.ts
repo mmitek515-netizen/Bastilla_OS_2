@@ -6,6 +6,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import dotenv from 'dotenv';
 import { execFile, spawn } from 'child_process';
+import { rateLimit } from 'express-rate-limit';
 import { promisify } from 'util';
 import fs from 'fs';
 import os from 'os';
@@ -83,33 +84,16 @@ const terminalCommandEnv: NodeJS.ProcessEnv = {
   ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
   ...(process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {}),
 };
-const terminalRequestLimits = new Map<string, { count: number; resetAt: number }>();
-function limitTerminalRequests(
-  req: express.Request,
-  res: express.Response,
-  next: express.NextFunction,
-) {
-  const now = Date.now();
-  const client = req.socket.remoteAddress || 'unknown';
-  let limit = terminalRequestLimits.get(client);
-  if (!limit || limit.resetAt <= now) {
-    limit = { count: 0, resetAt: now + 60_000 };
-    terminalRequestLimits.set(client, limit);
-  }
-  if (limit.count >= 30) {
-    res.set('Retry-After', String(Math.ceil((limit.resetAt - now) / 1000)));
-    return res.status(429).json({ success: false, error: 'Za dużo żądań terminala. Spróbuj ponownie za chwilę.' });
-  }
-  limit.count += 1;
-  if (terminalRequestLimits.size > 1024) {
-    for (const [address, entry] of terminalRequestLimits) {
-      if (entry.resetAt <= now) terminalRequestLimits.delete(address);
-    }
-  }
-  return next();
-}
-function executeTerminalCommand(command: string, cwd?: string): Promise<{ stdout: string; stderr: string }> {
+const limitTerminalRequests = rateLimit({
+  windowMs: 60_000,
+  limit: 30,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, error: 'Za dużo żądań terminala. Spróbuj ponownie za chwilę.' },
+});
+function executeTerminalCommand(command: string, appDir?: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    const cwd = appDir ? path.join(APPS_DIR, path.basename(appDir)) : undefined;
     const child = spawn('/bin/sh', [], {
       cwd,
       env: terminalCommandEnv,
@@ -2437,15 +2421,15 @@ Plik został zapisany w katalogu /exports i jest natychmiast widoczny w zakładc
         output = 'Użycie: sh <komenda powłoki>';
       } else {
         try {
-          const projectRoot = path.resolve('.');
-          let runCwd = projectRoot;
+          let commandAppDir: string | undefined;
           if (typeof appDir === 'string' && /^[a-zA-Z0-9_-]+$/.test(appDir)) {
-            const candidateDir = path.join(APPS_DIR, appDir);
+            const safeAppDir = path.basename(appDir);
+            const candidateDir = path.join(APPS_DIR, safeAppDir);
             try {
-              if (fs.lstatSync(candidateDir).isDirectory()) runCwd = candidateDir;
+              if (fs.lstatSync(candidateDir).isDirectory()) commandAppDir = safeAppDir;
             } catch {}
           }
-          const { stdout, stderr } = await executeTerminalCommand(shellCmd, runCwd);
+          const { stdout, stderr } = await executeTerminalCommand(shellCmd, commandAppDir);
           output = (stdout || '') + (stderr ? `\n[STDERR]: ${stderr}` : '');
           if (!output.trim()) output = '[Wykonano pomyślnie]';
         } catch (execErr: any) {
