@@ -3,8 +3,22 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const port = 39081;
-const url = `http://127.0.0.1:${port}/api/mcp`;
+import { createServer } from 'node:net';
+
+async function reserveEphemeralPort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  const port = address.port;
+  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  return port;
+}
+
+let port;
+let url;
 const token = 'mcp-ci-test-token-only-' + 'a'.repeat(48);
 
 async function probe(headers = {}, body) {
@@ -26,6 +40,8 @@ async function waitForServer(child) {
 }
 
 test('live MCP HTTP authentication and JSON-RPC handshake', { timeout: 65000 }, async () => {
+  port = await reserveEphemeralPort();
+  url = `http://127.0.0.1:${port}/api/mcp`;
   const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     env: { ...process.env, NODE_ENV: 'production', PORT: String(port), BASTILLA_MCP_TOKEN: token,
       LLM_PROVIDERS: 'without_nlp', AUTO_GIT_SYNC: 'false' },
