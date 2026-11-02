@@ -32,5 +32,35 @@ jobs:
         run: python debian13/smoke_test.py
       - name: Browser client syntax check
         run: node --check debian13/app.js
+      - name: Chromium runtime diagnostics
+        shell: bash
+        run: |
+          browser="${CHROME_BIN:-}"
+          if [[ -z "$browser" ]]; then
+            browser="$(command -v chromium || command -v chromium-browser || command -v google-chrome || command -v google-chrome-stable || true)"
+          fi
+          if [[ -z "$browser" || ! -x "$browser" ]]; then
+            echo "Chromium or Google Chrome is not installed on this runner." >&2
+            exit 1
+          fi
+          resolved="$(readlink -f "$browser")"
+          executable="$resolved"
+          if ! file "$resolved" | grep -q "ELF"; then
+            executable="$(dirname "$resolved")/chrome"
+          fi
+          if [[ ! -x "$executable" ]]; then
+            echo "Could not locate Chromium's executable binary." >&2
+            exit 1
+          fi
+          echo "Chromium command: $browser"
+          echo "Chromium launcher: $resolved"
+          echo "Chromium executable: $executable"
+          "$resolved" --version
+          ldd "$executable" | tee /tmp/debian13-chromium-dependencies.txt
+          if grep -q "not found" /tmp/debian13-chromium-dependencies.txt; then
+            echo "Chromium has missing shared-library dependencies." >&2
+            exit 1
+          fi
+          echo "E2E flags: --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-allow-origins=http://127.0.0.1 --remote-debugging-port=<ephemeral-loopback-port>"
       - name: Browser E2E against loopback HTTP
         run: python debian13/browser_e2e.py

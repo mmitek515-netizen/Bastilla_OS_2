@@ -161,6 +161,22 @@ def available_chromium() -> str:
     )
 
 
+def chromium_details(binary: str) -> tuple[str, str]:
+    path = str(Path(shutil.which(binary) or binary).resolve())
+    try:
+        result = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        version = (result.stdout or result.stderr).strip()
+    except (OSError, subprocess.SubprocessError) as error:
+        version = f"unavailable ({type(error).__name__})"
+    return path, version or "unknown"
+
+
 def run_e2e() -> None:
     system_service, service_thread, service_url = start_system_service()
     app = DemoApplication(
@@ -173,13 +189,21 @@ def run_e2e() -> None:
 
     try:
         with tempfile.TemporaryDirectory(prefix="debian13-chromium-") as profile_dir:
+            chromium = available_chromium()
+            chromium_path, chromium_version = chromium_details(chromium)
+            print(
+                f"Chromium runtime: binary={chromium_path}, version={chromium_version}",
+                flush=True,
+            )
             port_socket = socket.socket()
             port_socket.bind(("127.0.0.1", 0))
             port = port_socket.getsockname()[1]
             port_socket.close()
+            stderr_path = Path(profile_dir) / "chromium.stderr.log"
+            stderr_file = stderr_path.open("w", encoding="utf-8")
             browser = subprocess.Popen(
                 [
-                    available_chromium(),
+                    chromium_path,
                     "--headless=new",
                     "--no-sandbox",
                     "--disable-gpu",
@@ -192,16 +216,25 @@ def run_e2e() -> None:
                     "about:blank",
                 ],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=stderr_file,
                 start_new_session=True,
             )
             devtools = None
             try:
                 version = None
-                deadline = time.monotonic() + 10
+                deadline = time.monotonic() + 30
                 while time.monotonic() < deadline:
-                    if browser.poll() is not None:
-                        raise RuntimeError("Chromium exited before opening DevTools.")
+                    process_exit = browser.poll()
+                    if process_exit is not None:
+                        stderr_file.flush()
+                        details = stderr_path.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                        raise RuntimeError(
+                            "Chromium exited before opening DevTools; "
+                            f"binary={chromium_path!r}, version={chromium_version!r}, "
+                            f"exit={process_exit}, stderr={details[-8_000:]!r}"
+                        )
                     try:
                         with urllib.request.urlopen(
                             f"http://127.0.0.1:{port}/json/version", timeout=0.25
@@ -211,7 +244,14 @@ def run_e2e() -> None:
                     except OSError:
                         time.sleep(0.05)
                 if version is None:
-                    raise TimeoutError("Chromium did not start its DevTools endpoint.")
+                    stderr_file.flush()
+                    details = stderr_path.read_text(encoding="utf-8", errors="replace")
+                    raise TimeoutError(
+                        "Chromium did not start its DevTools endpoint within 30 seconds; "
+                        f"binary={chromium_path!r}, version={chromium_version!r}, "
+                        f"port={port}, process_exit={browser.poll()}, "
+                        f"stderr={details[-8_000:]!r}"
+                    )
                 if "Chrome/" not in version.get("Browser", ""):
                     raise RuntimeError("The browser endpoint is not Chromium or Chrome.")
                 page_url = (
@@ -381,6 +421,7 @@ def run_e2e() -> None:
                     except ProcessLookupError:
                         pass
                     browser.wait(timeout=5)
+                stderr_file.close()
     finally:
         server.shutdown()
         server.server_close()
