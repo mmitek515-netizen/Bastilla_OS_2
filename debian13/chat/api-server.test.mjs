@@ -231,6 +231,45 @@ test('v1 session history and model context survive API process reconnection', as
   ]);
 });
 
+test('authorized task lookup returns persisted Work status after reconnect', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'state.json');
+  let running = await startServer(path);
+  t.after(() => stopServer(running.server));
+
+  const response = await request(running.base, '/api/v1/chat', {
+    method: 'POST',
+    body: { message: 'A task to reconnect to', agent: 'astyria' },
+  });
+  assert.equal(response.status, 200);
+  const taskId = response.body.task.id;
+
+  const denied = await request(running.base, `/api/v1/tasks/${taskId}`, { token: '' });
+  assert.equal(denied.status, 401);
+
+  const first = await request(running.base, `/api/v1/tasks/${taskId}`);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.task.status, 'completed');
+  assert.equal(first.body.task.result, 'answer-1');
+  assert.equal(first.body.task.id, taskId);
+
+  await stopServer(running.server);
+  running = await startServer(path);
+  const reconnected = await request(running.base, `/api/v1/tasks/${taskId}`);
+  assert.equal(reconnected.status, 200);
+  assert.deepEqual(reconnected.body, first.body);
+
+  const missing = await request(
+    running.base,
+    '/api/v1/tasks/00000000-0000-4000-8000-000000000000',
+  );
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.error, 'task_not_found');
+  const malformed = await request(running.base, '/api/v1/tasks/not-a-uuid');
+  assert.equal(malformed.status, 404);
+});
+
 test('API v1 streaming emits the documented session and task events', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'debian13-chat-api-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

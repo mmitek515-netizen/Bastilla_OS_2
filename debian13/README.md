@@ -31,6 +31,9 @@ The adapter follows PR #97's `/api/v1` chat/session JSON and SSE shapes:
 `POST /chat`, `POST /chat/stream`, `GET /sessions/{session_id}/messages`,
 `GET /status`, `/agents`, `/tasks`, and `/events`, plus the bounded read-only
 `POST /terminal` (`pwd`, `ls`, or `cat <file>` inside the private workspace).
+`GET /tasks/{uuid}` returns one persisted task snapshot for authorized status
+reconnection; this supports observing Work progress but does not implement a
+multi-step Work orchestrator.
 All API routes require the operator bearer token. A new chat request creates a
 session; reusing its `session_id` reconnects to its persisted history. The approved-operation
 extension is `GET /api/v1/operations` and

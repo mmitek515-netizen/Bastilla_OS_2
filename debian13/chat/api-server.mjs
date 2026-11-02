@@ -545,6 +545,15 @@ export function createApiServer({
           sendJson(response, 200, { tasks: store.read().tasks.slice().reverse() });
           return;
         }
+        const taskMatch = path.match(/^\/api\/v1\/tasks\/([^/]+)$/);
+        if (taskMatch) {
+          const taskId = taskMatch[1];
+          if (!isSessionId(taskId)) throw new ApiError(404, 'task_not_found');
+          const task = store.read().tasks.find((item) => item.id === taskId);
+          if (!task) throw new ApiError(404, 'task_not_found');
+          sendJson(response, 200, { task: mapTask(task) });
+          return;
+        }
         if (path === `${apiPrefix}/events`) {
           sendJson(response, 200, { events: store.read().events.slice().reverse() });
           return;
