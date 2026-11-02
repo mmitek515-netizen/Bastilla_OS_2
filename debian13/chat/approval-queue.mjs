@@ -16,6 +16,7 @@ export class ApprovalQueueError extends Error {
 
 export class ApprovalQueue {
   #operatorToken;
+  #store;
   #items = new Map();
   #audit = [];
   #clock;
@@ -31,6 +32,7 @@ export class ApprovalQueue {
     maxPending = DEFAULT_MAX_PENDING,
     maxRecords = DEFAULT_MAX_RECORDS,
     ttlMs = DEFAULT_TTL_MS,
+    store = null,
   }) {
     if (
       typeof clock !== 'function' ||
@@ -46,80 +48,105 @@ export class ApprovalQueue {
     }
 
     this.#operatorToken = operatorToken;
+    if (store !== null && typeof store.read !== 'function') {
+      throw new TypeError('invalid_state_store');
+    }
+    this.#store = store;
     this.#clock = clock;
     this.#idGenerator = idGenerator;
     this.#maxPending = maxPending;
     this.#maxRecords = maxRecords;
     this.#ttlMs = ttlMs;
+    const saved = store?.read();
+    for (const item of saved?.approvals ?? []) {
+      if (
+        !item ||
+        typeof item.id !== 'string' ||
+        !validateOperation(item.operation) ||
+        !['pending_approval', 'approved', 'rejected', 'expired'].includes(item.status) ||
+        !Number.isInteger(item.version)
+      ) {
+        throw new TypeError('invalid_persisted_queue');
+      }
+      this.#items.set(item.id, structuredClone(item));
+    }
+    this.#audit = structuredClone(saved?.audit ?? []);
   }
 
   submit(operation, authorizationHeader) {
     this.#assertAuthorized(authorizationHeader);
-    this.#expirePending();
 
     const validatedOperation = validateOperation(operation);
     if (!validatedOperation) throw new ApprovalQueueError('invalid_operation');
 
-    const pendingCount = [...this.#items.values()].filter((item) => item.status === 'pending_approval').length;
-    if (pendingCount >= this.#maxPending) throw new ApprovalQueueError('queue_full');
+    return this.#mutate(() => {
+      this.#expirePending();
+      const pendingCount = [...this.#items.values()].filter((item) => item.status === 'pending_approval').length;
+      if (pendingCount >= this.#maxPending) throw new ApprovalQueueError('queue_full');
 
-    const now = this.#clock();
-    const id = this.#idGenerator();
-    if (typeof id !== 'string' || id.length === 0 || this.#items.has(id)) {
-      throw new ApprovalQueueError('id_generation_failed');
-    }
-    const item = {
-      id,
-      operation: validatedOperation,
-      risk: 'high',
-      status: 'pending_approval',
-      createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + this.#ttlMs).toISOString(),
-      version: 1,
-    };
+      const now = this.#clock();
+      const id = this.#idGenerator();
+      if (typeof id !== 'string' || id.length === 0 || this.#items.has(id)) {
+        throw new ApprovalQueueError('id_generation_failed');
+      }
+      const item = {
+        id,
+        operation: validatedOperation,
+        risk: 'high',
+        status: 'pending_approval',
+        createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + this.#ttlMs).toISOString(),
+        version: 1,
+      };
 
-    this.#items.set(item.id, item);
-    this.#record('operation.proposed', item.id, now);
-    this.#trimHistory();
-    return structuredClone(item);
+      this.#items.set(item.id, item);
+      this.#record('operation.proposed', item.id, now);
+      this.#trimHistory();
+      return structuredClone(item);
+    });
   }
 
   list(authorizationHeader) {
     this.#assertAuthorized(authorizationHeader);
-    this.#expirePending();
-    return [...this.#items.values()]
-      .filter((item) => item.status === 'pending_approval')
-      .map((item) => structuredClone(item));
+    return this.#mutate(() => {
+      this.#expirePending();
+      return [...this.#items.values()]
+        .filter((item) => item.status === 'pending_approval')
+        .map((item) => structuredClone(item));
+    });
   }
 
   decide(id, decision, expectedVersion, authorizationHeader) {
     this.#assertAuthorized(authorizationHeader);
-    this.#expirePending();
-
     if (decision !== 'approve' && decision !== 'reject') {
       throw new ApprovalQueueError('invalid_decision');
     }
 
-    const item = this.#items.get(id);
-    if (!item) throw new ApprovalQueueError('not_found');
-    if (item.status === 'expired') throw new ApprovalQueueError('expired');
-    if (item.status !== 'pending_approval') throw new ApprovalQueueError('already_decided');
-    if (!Number.isInteger(expectedVersion) || expectedVersion !== item.version) {
-      throw new ApprovalQueueError('stale_version');
-    }
+    return this.#mutate(() => {
+      this.#expirePending();
+      const item = this.#items.get(id);
+      if (!item) throw new ApprovalQueueError('not_found');
+      if (item.status === 'expired') throw new ApprovalQueueError('expired');
+      if (item.status !== 'pending_approval') throw new ApprovalQueueError('already_decided');
+      if (!Number.isInteger(expectedVersion) || expectedVersion !== item.version) {
+        throw new ApprovalQueueError('stale_version');
+      }
 
-    const now = this.#clock();
-    item.status = decision === 'approve' ? 'approved' : 'rejected';
-    item.decidedAt = new Date(now).toISOString();
-    item.version += 1;
-    this.#record(`operation.${item.status}`, item.id, now);
-    return structuredClone(item);
+      const now = this.#clock();
+      item.status = decision === 'approve' ? 'approved' : 'rejected';
+      item.decidedAt = new Date(now).toISOString();
+      item.version += 1;
+      this.#record(`operation.${item.status}`, item.id, now);
+      return structuredClone(item);
+    });
   }
 
   auditEntries(authorizationHeader) {
     this.#assertAuthorized(authorizationHeader);
-    this.#expirePending();
-    return structuredClone(this.#audit);
+    return this.#mutate(() => {
+      this.#expirePending();
+      return structuredClone(this.#audit);
+    });
   }
 
   #assertAuthorized(authorizationHeader) {
@@ -151,6 +178,27 @@ export class ApprovalQueue {
       const removableId = [...this.#items.values()].find((item) => item.status !== 'pending_approval')?.id;
       if (!removableId) break;
       this.#items.delete(removableId);
+    }
+  }
+
+  #mutate(action) {
+    const previousItems = this.#items;
+    const previousAudit = this.#audit;
+    this.#items = new Map(
+      [...previousItems].map(([id, item]) => [id, structuredClone(item)]),
+    );
+    this.#audit = structuredClone(previousAudit);
+    try {
+      const result = action();
+      this.#store?.update((state) => {
+        state.approvals = [...this.#items.values()];
+        state.audit = this.#audit;
+      });
+      return result;
+    } catch (error) {
+      this.#items = previousItems;
+      this.#audit = previousAudit;
+      throw error;
     }
   }
 }

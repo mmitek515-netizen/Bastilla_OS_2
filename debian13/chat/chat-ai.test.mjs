@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ApprovalQueue } from './approval-queue.mjs';
-import { ChatService } from './chat-service.mjs';
+import { ChatService, MAX_CHAT_MESSAGE_BYTES } from './chat-service.mjs';
 import { OllamaClient, OllamaClientError } from './ollama-client.mjs';
 
 const operatorToken = 'operator-test-token-0123456789abcdef';
@@ -168,8 +168,11 @@ test('Ollama client checks installed models and requests bounded structured chat
     },
   });
 
+  assert.equal(client.modelName, 'local-model');
+  assert.equal(client.inferenceVerified, false);
   assert.deepEqual(await client.listModels(), ['local-model']);
   assert.equal(await client.chat([{ role: 'user', content: 'Cześć' }]), '{"reply":"Witaj","operation":null}');
+  assert.equal(client.inferenceVerified, true);
   assert.equal(requests[0].options.method, 'GET');
   assert.equal(requests[1].options.method, 'POST');
   const body = JSON.parse(requests[1].options.body);
@@ -218,6 +221,9 @@ test('chat messages are bounded and history is operator-authorized', async () =>
     model: { chat: async () => '{"reply":"OK","operation":null}' },
   });
   await assert.rejects(chat.sendMessage('   ', authorization), { code: 'invalid_message' });
-  await assert.rejects(chat.sendMessage('x'.repeat(4097), authorization), { code: 'invalid_message' });
+  await assert.rejects(
+    chat.sendMessage('x'.repeat(MAX_CHAT_MESSAGE_BYTES + 1), authorization),
+    { code: 'invalid_message' },
+  );
   assert.throws(() => chat.history(), { code: 'unauthorized' });
 });

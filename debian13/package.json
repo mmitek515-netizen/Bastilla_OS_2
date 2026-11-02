@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node ./chat/demo.mjs",
+    "start:api": "node ./chat/api-server.mjs",
     "test": "node --test ./chat/*.test.mjs"
   }
 }

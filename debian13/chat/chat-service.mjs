@@ -3,9 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { isOperatorAuthorized } from './authorization.mjs';
 import { parseNaturalCommand, validateOperation } from './parser.mjs';
 
-export const MAX_CHAT_MESSAGE_BYTES = 4096;
+export const MAX_CHAT_MESSAGE_BYTES = 16_000;
 export const MAX_CHAT_REPLY_BYTES = 4000;
 export const MAX_HISTORY_MESSAGES = 20;
+export const MAX_SESSION_HISTORY_BYTES = 64_000;
 
 const SYSTEM_PROMPT = [
   'You are the Debian 13 system chat. Reply in the user’s language.',
@@ -97,6 +98,7 @@ export class ChatService {
   #sessionId;
   #history = [];
   #maxHistory;
+  #store;
 
   constructor({
     model = null,
@@ -105,6 +107,7 @@ export class ChatService {
     systemStatusProvider = collectSystemStatus,
     sessionId = randomUUID(),
     maxHistory = MAX_HISTORY_MESSAGES,
+    store = null,
   } = {}) {
     if (!queue || typeof queue.submit !== 'function') throw new TypeError('approval_queue_required');
     if (typeof operatorToken !== 'string') throw new TypeError('operator_token_required');
@@ -112,6 +115,7 @@ export class ChatService {
     if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('invalid_session_id');
     if (!Number.isInteger(maxHistory) || maxHistory < 2) throw new TypeError('invalid_history_limit');
     if (model !== null && typeof model.chat !== 'function') throw new TypeError('invalid_chat_model');
+    if (store !== null && typeof store.read !== 'function') throw new TypeError('invalid_state_store');
 
     this.#model = model;
     this.#queue = queue;
@@ -119,18 +123,28 @@ export class ChatService {
     this.#systemStatus = systemStatusProvider;
     this.#sessionId = sessionId;
     this.#maxHistory = maxHistory;
+    this.#store = store;
   }
 
-  async sendMessage(message, authorizationHeader) {
+  async sendMessage(message, authorizationHeader, sessionId = this.#sessionId, agent = 'astyria') {
     this.#assertAuthorized(authorizationHeader);
     assertChatMessage(message);
+    if (typeof sessionId !== 'string' || !sessionId) throw new ChatServiceError('invalid_session_id');
 
-    const intent = parseNaturalCommand(message);
+    const intent = message === '/help' || message === '/status'
+      ? null
+      : parseNaturalCommand(message);
     let reply;
     let notice = null;
     let operation = null;
     let source = 'application';
-    if (intent?.kind === 'read') {
+    if (message === '/help') {
+      reply = 'Obsługiwane lokalne polecenia: /help, /status, /terminal pwd, /terminal ls, /terminal cat <plik>. Pozostałe wiadomości wymagają dostępnego modelu Ollama.';
+      source = 'local_command';
+    } else if (message === '/status') {
+      reply = JSON.stringify(this.#systemStatus());
+      source = 'local_status';
+    } else if (intent?.kind === 'read') {
       reply = JSON.stringify(this.#systemStatus());
     } else if (intent?.kind === 'proposal') {
       operation = this.#queue.submit(intent.operation, authorizationHeader);
@@ -140,7 +154,9 @@ export class ChatService {
       if (!this.#model) throw new ChatServiceError('model_unavailable');
       const context = [
         { role: 'system', content: SYSTEM_PROMPT },
-        ...this.#history.slice(-this.#maxHistory),
+        ...this.#readHistory(sessionId)
+          .filter((entry) => entry.source === 'local-model')
+          .slice(-this.#maxHistory),
         { role: 'user', content: message },
       ];
       const result = parseModelResponse(await this.#model.chat(context));
@@ -152,23 +168,45 @@ export class ChatService {
       }
     }
 
-    this.#remember('user', message);
-    this.#remember('assistant', reply, source);
+    this.#rememberExchange(sessionId, agent, message, reply, source);
     return {
-      sessionId: this.#sessionId,
+      sessionId,
       reply,
       notice,
       operation,
       source,
-      verified: source === 'application',
+      verified: source !== 'local-model',
     };
   }
 
-  history(authorizationHeader) {
+  recordLocalResponse(message, reply, authorizationHeader, sessionId, agent, source) {
+    this.#assertAuthorized(authorizationHeader);
+    assertChatMessage(message);
+    if (
+      typeof reply !== 'string' ||
+      typeof sessionId !== 'string' ||
+      !sessionId ||
+      typeof agent !== 'string' ||
+      !['local_command', 'local_status', 'restricted_terminal'].includes(source)
+    ) {
+      throw new ChatServiceError('invalid_local_response');
+    }
+    this.#rememberExchange(sessionId, agent, message, reply, source);
+    return {
+      sessionId,
+      reply,
+      notice: null,
+      operation: null,
+      source,
+      verified: true,
+    };
+  }
+
+  history(authorizationHeader, sessionId = this.#sessionId) {
     this.#assertHistoryAuthorization(authorizationHeader);
     return {
-      sessionId: this.#sessionId,
-      messages: structuredClone(this.#history),
+      sessionId,
+      messages: structuredClone(this.#readHistory(sessionId)),
     };
   }
 
@@ -182,16 +220,63 @@ export class ChatService {
     }
   }
 
-  #remember(role, content, source = 'user') {
-    this.#history.push({
-      role,
-      content,
-      source,
-      verified: source === 'application' || source === 'user',
-      createdAt: new Date().toISOString(),
-    });
+  #readHistory(sessionId) {
+    if (!this.#store) return this.#history;
+    const session = this.#store.read().sessions[sessionId];
+    if (!session) throw new ChatServiceError('session_not_found');
+    return session.messages;
+  }
+
+  #rememberExchange(sessionId, agent, userMessage, assistantMessage, source) {
+    const timestamp = new Date().toISOString();
+    const entries = [
+      {
+        role: 'user',
+        content: userMessage,
+        source,
+        verified: true,
+        createdAt: timestamp,
+        agent,
+      },
+      {
+        role: 'assistant',
+        content: assistantMessage,
+        source,
+        verified: ['application', 'local_command', 'local_status', 'restricted_terminal'].includes(source),
+        createdAt: timestamp,
+        agent,
+      },
+    ];
+    if (this.#store) {
+      this.#store.update((state) => {
+        const session = state.sessions[sessionId];
+        if (!session) throw new ChatServiceError('session_not_found');
+        session.messages.push(...entries);
+        if (session.messages.length > this.#maxHistory) {
+          session.messages.splice(0, session.messages.length - this.#maxHistory);
+        }
+        while (
+          session.messages.length > 2 &&
+          session.messages.reduce((total, item) => total + Buffer.byteLength(item.content, 'utf8'), 0) >
+            MAX_SESSION_HISTORY_BYTES
+        ) {
+          session.messages.splice(0, 2);
+        }
+        session.updated_at = timestamp;
+      });
+      return;
+    }
+
+    this.#history.push(...entries);
     if (this.#history.length > this.#maxHistory) {
       this.#history.splice(0, this.#history.length - this.#maxHistory);
+    }
+    while (
+      this.#history.length > 2 &&
+      this.#history.reduce((total, item) => total + Buffer.byteLength(item.content, 'utf8'), 0) >
+        MAX_SESSION_HISTORY_BYTES
+    ) {
+      this.#history.splice(0, 2);
     }
   }
 }

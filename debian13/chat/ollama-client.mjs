@@ -51,6 +51,15 @@ export class OllamaClient {
   #model;
   #fetch;
   #timeoutMs;
+  #inferenceVerified = false;
+
+  get modelName() {
+    return this.#model;
+  }
+
+  get inferenceVerified() {
+    return this.#inferenceVerified;
+  }
 
   constructor({
     baseUrl = OLLAMA_ORIGIN,
@@ -117,6 +126,7 @@ export class OllamaClient {
     if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > 16_000) {
       throw new OllamaClientError('invalid_provider_response');
     }
+    this.#inferenceVerified = true;
     return content;
   }
 
