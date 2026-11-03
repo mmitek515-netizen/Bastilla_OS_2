@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { getAgentConnectivity } from '../kernel/agentConnectivity';
 
-type AgentStatus = { enabled: boolean; lastCheck: string | null; status: 'waiting' | 'online' | 'offline'; error: string | null };
+type AgentStatus = { enabled: boolean; lastCheck: string | null; status: 'waiting' | 'online' | 'offline' | 'no-models'; error: string | null };
 type Response = { monitoring: boolean; intervalMs: number; agents: Record<string, AgentStatus>; note: string };
 export function BackgroundAgentsStatus() {
   const [data, setData] = useState<Response | null>(null);
@@ -34,14 +35,23 @@ export function BackgroundAgentsStatus() {
       <div className="grid gap-2 sm:grid-cols-2">
         {(['Aria', 'Astyria', 'Alex', 'Aurelius'] as const).map(name => {
           const agent = data?.agents[name];
+          const connectivity = getAgentConnectivity(agent?.status, error);
+          const runtimeLabel = connectivity.runtime === 'available'
+            ? 'dostępna'
+            : connectivity.runtime === 'offline'
+              ? 'niedostępna'
+              : connectivity.runtime === 'no-models'
+                ? 'brak modeli'
+                : 'brak danych';
           return <div key={name} className="rounded-lg border border-slate-700 bg-slate-900 p-3">
             <div className="font-medium">{name}</div>
-            <div className="text-xs text-slate-400">{error ? 'Brak połączenia z serwerem' : agent?.status === 'online' ? 'Ollama dostępna' : agent?.status === 'offline' ? 'Ollama niedostępna' : 'Oczekiwanie na pomiar'}</div>
-            <div className="mt-1 text-xs text-slate-500">{agent?.lastCheck ? new Date(agent.lastCheck).toLocaleTimeString('pl-PL') : '—'}</div>
+            <div className="text-xs text-amber-300">API oryginalnego workera: {connectivity.sourceApi}</div>
+            <div className="text-xs text-slate-400">Wspólny runtime Ollama: {runtimeLabel}</div>
+            <div className="mt-1 text-xs text-slate-500">Ostatni test Ollamy: {agent?.lastCheck ? new Date(agent.lastCheck).toLocaleTimeString('pl-PL') : '—'}</div>
           </div>;
         })}
       </div>
-      <p className="text-xs text-slate-500">Monitoring sprawdza wspólne połączenie z Ollama. Nie oznacza, że każdy agent prowadzi autonomiczne obliczenia.</p>
+      <p className="text-xs text-slate-500">Serwer sprawdza wyłącznie wspólną Ollamę. Nie ma skonfigurowanego endpointu ani uwierzytelnienia źródłowych workerów; ten status nie potwierdza ich łączności ani autonomicznej pracy.</p>
     </section>
   );
 }

@@ -119,3 +119,67 @@ oceny migracji. Nie scalano innych PR ani nie wznawiano rozbudowy produktu.
 **Następny krok:** przed publicznym uruchomieniem wykonać pełny przegląd i
 zabezpieczenie API wykonującego operacje zapisu/powłoki, uruchomić testy z Node
 24 w prywatnym Codespace oraz potwierdzić docelowy projekt migracji.
+
+## Audyt oryginalnych agentów — 2026-11-03
+
+- `src/kernel/agents.ts:11-47` definiuje UI/persony, nie procesy agentów ani
+  tożsamości w źródłowym AI Studio. `server.ts:5657-5698` obsługuje wspólny
+  czat, a `/api/agent-tasks/run` (`server.ts:6364-6404`) dla `ai_task` wywołuje
+  współdzielony `LLM_CHAIN_CONFIG`. To nie jest dispatch do oryginalnego
+  workera.
+- Zmienne środowiskowe obecnego projektu zawierają wspólne klucze dostawców
+  modeli oraz `BASTILLA_AGENT_TASKS_TOKEN` (`.env.example:9-15,58-65`), ale
+  nie zawierają URL, API capabilities ani poświadczeń oryginalnego API
+  agentów. Nie znaleziono w repozytorium opisu takiego kontraktu. Nie
+  odczytywano wartości sekretów; nazwy zmiennych runtime nie wskazują
+  konfiguracji źródłowego agenta.
+- `/api/agents/background/status` i panel bazują na jednym wspólnym teście
+  `/api/tags` Ollamy (`server.ts:295-359`). Panel rozdziela teraz tę
+  dostępność runtime od statusu API każdego oryginalnego workera:
+  `not_connected`. Testy `tests/agentConnectivity.test.mjs` sprawdzają, że
+  pozytywny test Ollamy nie zmienia statusu źródłowego workera.
+- Istniejąca kolejka `/api/agent-tasks` jest lokalnym rejestrem: ma logi i
+  artefakty, statusy `queued/running/completed/failed`, a uruchamianie i
+  anulowanie wymagają `BASTILLA_AGENT_TASKS_TOKEN`. Nie potwierdza odbioru
+  zadania przez oryginalnego workera, GitHub Issue, PR ani CI. Nie wysłano
+  zlecenia zewnętrznemu agentowi.
+- Audyt MCP znalazł rozbieżność: narzędzie `chat_triad` wysyła żądanie do
+  `/api/chat` z `target` (`server.ts:6097-6104`), natomiast obsługiwany czat
+  jest pod `/api/triad/message` i używa `agent` (`server.ts:5657`). Nie
+  przekierowano narzędzia automatycznie, ponieważ handler czatu może uruchomić
+  side-effecty, a ogólne uwierzytelnianie API nadal jest blockerem.
+- Nie przetestowano cyklu Issue→worker→PR→CI w prywatnym Codespace. To
+  środowisko nie ma narzędzia do otwarcia prywatnego Codespace ani
+  skonfigurowanego endpointu/poświadczeń źródłowego workera. Brak tych danych
+  blokuje bezpieczne sprawdzenie capabilities, tożsamości, autoryzacji,
+  heartbeat, logów i odpowiedzi. Nie uruchomiono symulowanego cyklu.
+
+**Wymagane do dalszej integracji:** właściciel musi wskazać dokumentację i
+origin oryginalnego API (w tym format capabilities, health, task submission,
+logs/events i tożsamości czterech agentów) oraz skonfigurować ograniczone
+poświadczenie jako sekret w docelowym środowisku. Nie wklejać tokenu do issue,
+repozytorium ani UI. Dla testu GitHub wymagany jest prywatny Codespace oraz
+zatwierdzony worker i zakres uprawnień ograniczony do tego repozytorium.
+
+### Weryfikacja poprawki statusu
+
+- Zmieniono `src/components/BackgroundAgentsStatus.tsx`; dodano
+  `src/kernel/agentConnectivity.ts` i `tests/agentConnectivity.test.mjs`;
+  raport uzupełniono w tym pliku.
+- `npm ci`: PASS, 317 pakietów; Node `v22.23.4` zgłasza niezgodność z
+  deklaracją Node 24, a npm nadal raportuje cztery wysokie advisories.
+- `node --test tests/agentConnectivity.test.mjs tests/agentTasks.test.mjs`:
+  PASS, 7/7. `npm run lint`: PASS.
+- `npm run verify`: PASS, 97/97 testów, TypeScript, build UI i build serwera.
+  Build nadal ostrzega o dużym bundlu UI (~1.856 MB, ~515 kB gzip).
+- Lokalny serwer developerski nasłuchiwał wyłącznie na `127.0.0.1:3122`;
+  `/` zwróciło 200, a `npm run check:api -- http://127.0.0.1:3122`
+  zaliczyło 5/5 endpointów. Faktyczny status monitoringu pokazał Ollama
+  offline/0 modeli; żaden test nie dowodzi odpowiedzi agenta.
+- Zrzuty renderowanego GUI Chromium: `/tmp/bastilla-agent-status-desktop.png`
+  (1365×900) oraz `/tmp/bastilla-agent-status-mobile.png` (390×844).
+  To test lokalny, nie Codespaces; pliki są poza repozytorium.
+- Nie uruchomiono połączenia do źródłowego API, GitHub workera ani prywatnego
+  Codespace. Nie wykonano cyklu Issue→worker→PR→CI, ponieważ brakuje
+  endpointu/protokołu i ograniczonych poświadczeń oryginalnego workera oraz
+  dostępu do wskazanego Codespace.
