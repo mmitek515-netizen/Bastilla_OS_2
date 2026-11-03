@@ -43,7 +43,8 @@ oceny migracji. Nie scalano innych PR ani nie wznawiano rozbudowy produktu.
 ### Zmiana i weryfikacja
 
 - PR: https://github.com/mmitek515-netizen/Bastilla_OS_2/pull/110
-- Zweryfikowany commit: `600083d60b55aa8fd2678b86f8665dd67b7fe829`
+- Zweryfikowane commity: `600083d60b55aa8fd2678b86f8665dd67b7fe829` i
+  `8596f9ae94438a2fcaa90eed1f3b9646d9639684`.
 - Zmienione pliki: `.env.example`, `server.ts`, `src/lib/serverHost.mjs`,
   `tests/serverHost.test.mjs`.
 - `npm ci`: zakończone; 317 pakietów. Środowisko ma Node `v22.23.4`, mimo że
@@ -51,33 +52,44 @@ oceny migracji. Nie scalano innych PR ani nie wznawiano rozbudowy produktu.
   npm zgłosił też 4 podatności wysokiej wagi w zależnościach; automatycznej
   aktualizacji nie wykonano, ponieważ proponowana naprawa wymaga głównego
   downgrade'u Firebase.
-- `npm run verify` na powyższym SHA: PASS — 94/94 testy, TypeScript, build UI
-  i build serwera. Build UI zgłasza chunk JS 1.855 MB (514.67 kB gzip).
-- Serwer deweloperski uruchomiono lokalnie z `HOST=127.0.0.1`, `PORT=3118`.
-  Listener był na `127.0.0.1:3118`; strona główna zwróciła HTTP 200.
-- `npm run check:api -- http://127.0.0.1:3118`: 5/5 endpointów HTTP 200.
+- `npm run verify` po zmianach, na drzewie `8596f9a`: PASS — 95/95 testy,
+  TypeScript, build UI i build serwera. Build UI zgłasza chunk JS 1.855 MB
+  (514.67 kB gzip).
+- `src/lib/serverHost.mjs` domyślnie wiąże loopback i odrzuca hosty spoza
+  loopback; test uruchomienia z `HOST=0.0.0.0` kończy się błędem konfiguracji.
+- Serwer produkcyjny uruchomiono lokalnie z `HOST=127.0.0.1`, `PORT=3120`.
+  Listener był na `127.0.0.1:3120`; strona główna zwróciła HTTP 200.
+- `npm run check:api -- http://127.0.0.1:3120`: 5/5 endpointów HTTP 200.
   Ollama była offline; ten wynik nie potwierdza działania modelu, MCP ani
   połączenia ChatGPT.
-- Wygenerowano lokalny zrzut interfejsu Chromium: `/tmp/bastilla-ui.png`
-  (1365×900) oraz `/tmp/bastilla-ui-mobile.png` (390×844). Pliki tymczasowe
-  nie są częścią PR. Pulpit renderował się; narzędzie przeglądarki zerwało
-  kontekst nawigacji podczas próby kliknięcia, więc przepływów nawigacji nie
-  uznano za przetestowane.
+- Uruchomiono GUI przez lokalny serwer produkcyjny w Chromium; nagłówek i pulpit
+  wyrenderowały się, a kliknięcie nawigacji „Bastilla OS 2” otworzyło widok
+  aplikacji. Zapisano tymczasowe zrzuty 1280×800 i 390×844 w
+  `/tmp/playwright-logs/bastilla-dashboard.png` i
+  `/tmp/playwright-logs/bastilla-dashboard-mobile.png`; nie są częścią PR.
+  Konsola zgłosiła niedostępność `https://cdn.tailwindcss.com/` w podglądzie
+  osadzonej aplikacji oraz ostrzeżenie sandbox iframe. Nie testowano
+  destrukcyjnych akcji GUI.
 - Nie uruchomiono prywatnego GitHub Codespace: to środowisko nie udostępniało
   narzędzia do otwarcia wskazanego Codespace, a zmienne Codespaces nie były
   obecne. Testy powyżej wykonano lokalnie, nie w Codespace; prywatności
   przekazywanego portu nie potwierdzono.
+- CI dla `8596f9a` zakończyło się `action_required` bez uruchomionych zadań:
+  https://github.com/mmitek515-netizen/Bastilla_OS_2/actions/runs/41641048215.
+  Nie jest to ani pass, ani test failure; lokalny PASS nie dowodzi zielonego CI.
 
 ### Ryzyka i blokady
 
-- Zmiana ustawia bezpieczniejszy domyślny bind loopback i honoruje `HOST`;
-  jawne `HOST=0.0.0.0` nadal wystawia serwer na wszystkie interfejsy.
+- Serwer odrzuca jawny `HOST=0.0.0.0`, ale lokalne API nadal nie ma
+  uwierzytelnienia ogólnego. Nie należy go wystawiać poza loopback ani
+  przekazywać publicznie.
 - Audyt wykazał niezabezpieczone przed uwierzytelnieniem ścieżki zapisu i
   wykonywania powłoki, m.in. `/api/kernel/command` (`server.ts:4089`, powłoka
   w liniach 4168 i 4213), `/api/apps/execute` (`server.ts:2151`, powłoka
-  w linii 2372) oraz wykonanie w czacie (linia 4928). Nie należy wystawiać
-  serwera publicznie. Pakiet systemowy uruchamia usługę jako root
-  (`bastillaos/system-package/systemd/bastillaos-system.service:8-9`).
+  w linii 2372) oraz `/api/triad/message` bez auth, które uruchamia wykonanie
+  poleceń czatu (`server.ts:5657`, `4919-4936`, `5807`); odpowiedź modelu może
+  uruchomić automatyczne akcje (`server.ts:5935`). Pakiet systemowy uruchamia
+  usługę jako root (`bastillaos/system-package/systemd/bastillaos-system.service:8-9`).
 - Ostatni dostępny GitHub Actions dla SHA miał `action_required` i zero zadań;
   lokalny PASS nie jest dowodem zielonego CI. Odczyt alertów secret/code
   scanning był zablokowany przez GitHub API 403. Nie sprawdzano wartości
