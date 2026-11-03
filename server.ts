@@ -1,6 +1,7 @@
 import express from 'express';
 import { registerGptActions } from './src/lib/gptActions.mjs';
 import { sendChatError } from './src/lib/chatTransport.mjs';
+import { getServerHost } from './src/lib/serverHost.mjs';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
@@ -153,6 +154,7 @@ const app = express();
 const portArgIndex = process.argv.indexOf('--port');
 const DEFAULT_PORT = Number(portArgIndex >= 0 ? process.argv[portArgIndex + 1] : process.env.PORT || 3000);
 const PORT = Number.isFinite(DEFAULT_PORT) && DEFAULT_PORT > 0 ? DEFAULT_PORT : 3000;
+const HOST = getServerHost();
 let activeServerPort = PORT;
 const PYTHON_SCRIPT_PATH = path.resolve('svl_kernel.py');
 const KERNEL_STORE_PATH = path.resolve(process.env.SVL_KERNEL_STORE_PATH || '.svl_kernel_store.json');
@@ -6590,9 +6592,9 @@ async function startServer() {
   }
 
   const bindServer = (port: number) => {
-    const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(port, HOST, () => {
       activeServerPort = port;
-      console.log(`[SVL-KERNEL] Server listening on http://0.0.0.0:${port}`);
+      console.log(`[SVL-KERNEL] Server listening on http://${HOST}:${port}`);
       if (usesOllama()) {
         // Rozgrzewka w tle: wagi modelu trafiają do pamięci, zanim padnie pierwsza wiadomość.
         void warmupOllama(LLM_CHAIN_CONFIG, AbortSignal.timeout(180000)).then((warm) => {
@@ -6629,5 +6631,4 @@ async function startServer() {
 startServer().catch((err) => {
   console.error('[SVL-KERNEL] Failed to start server:', err);
 });
-
 
