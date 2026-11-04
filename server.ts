@@ -5861,7 +5861,7 @@ app.post('/api/triad/message', async (req, res) => {
 
   // CZAT TRIADY: swobodna rozmowa — Gemini → xAI (Grok) → Ollama (lokalny model) → without_nlp.
   const llmProviders = configuredProviders(LLM_CHAIN_CONFIG);
-  if (llmProviders.length === 0 && !CHAT_LOCAL_FALLBACK) {
+  if (llmProviders.length === 0 && (!CHAT_LOCAL_FALLBACK || attachments.some((attachment) => attachment.mimeType?.startsWith('image/')))) {
     return sendChatError(req, res, 503, 'Brak skonfigurowanego modelu czatu. Ustaw LLM_PROVIDERS="ollama" i uruchom Ollamę albo skonfiguruj dostawcę API w sekretach serwera.');
   }
   if (attachments.some((attachment) => attachment.mimeType === 'application/pdf') && !llmProviders.includes('gemini')) {
@@ -5905,7 +5905,7 @@ app.post('/api/triad/message', async (req, res) => {
         } catch (error: any) {
           const failures = error instanceof LlmChainError ? error.failures.join(' | ') : String(error?.message || error);
           pushSystemLog('warn', 'KERNEL', `[CZAT] ${agent}: modele niedostępne (${failures})${CHAT_LOCAL_FALLBACK ? ' — fallback without_nlp.' : '.'}`);
-          if (!CHAT_LOCAL_FALLBACK) {
+          if (!CHAT_LOCAL_FALLBACK || hasImageAttachment) {
             return { agent, text: '', engine: 'error', llm: false, error: `${agent}: ${failures}` };
           }
         }
